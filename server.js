@@ -13,7 +13,6 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer'); 
 
 const app = express();
-const PORT = 3000;
 // NEW: Use express.json() middleware for parsing JSON bodies in API requests
 app.use(express.json());
 
@@ -23,21 +22,6 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
-
-// Check if URI is available
-if (!MONGODB_URI) {
-    console.error('❌ FATAL ERROR: MONGODB_URI not found in .env file!');
-    process.exit(1); // Exit the process if the connection string is missing
-}
-// 🚨 NEW: Check if JWT Secret is available
-if (!JWT_SECRET) {
-    console.error('❌ FATAL ERROR: JWT_SECRET not found in .env file!');
-    process.exit(1); 
-}
-
-mongoose.connect(MONGODB_URI) 
-    .then(() => console.log('✅ MongoDB Connected to the Sunflower Banking Database!')) 
-    .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // --- 1. EMAIL TRANSPORT SETUP ---
 // Configuration to connect to an SMTP service (e.g., Gmail using an App Password)
@@ -3434,6 +3418,37 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
 // 🚨🚨 CRITICAL FIX: MOVE STATIC FILE SERVING TO THE VERY END 🚨🚨
 // ------------------------------------------------------------
 
+// --- Database Connection Function ---
+async function connectDB() {
+    // Keep your critical checks here (or near the top of the file)
+    if (!process.env.MONGODB_URI) { 
+        console.error('❌ FATAL ERROR: MONGODB_URI not found in environment!');
+        process.exit(1);
+    }
+    if (!process.env.JWT_SECRET) { 
+        console.error('❌ FATAL ERROR: JWT_SECRET not found in environment!');
+        process.exit(1);
+    }
+
+    if (mongoose.connection.readyState !== 1) { 
+        console.log('Attempting to connect to MongoDB...');
+        try {
+            await mongoose.connect(process.env.MONGODB_URI);
+            console.log('MongoDB connected successfully!');
+            
+            // This runs ONLY AFTER a successful connection
+            // You may need to define populateInitialData() if it doesn't exist
+            await populateInitialData(); 
+            
+        } catch (error) {
+            console.error('*** CRITICAL: MongoDB connection error. Cannot start server. ***', error);
+            throw error; // Propagate the error for the server to catch
+        }
+    } else {
+        console.log('MongoDB already connected.');
+    }
+}
+
 // Make the 'uploads' folder publicly accessible 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -3451,10 +3466,21 @@ app.get('/', (req, res) => {
 app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
 });
+const PORT = process.env.PORT || 8080; // Use your desired fallback port
 
-// --- SERVER START ---
-app.listen(PORT, () => {
-    console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
+connectDB().then(() => {
+    // This executes ONLY if the database connection was successful
+    app.listen(PORT, () => {
+        console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
+        // You can add the rest of your console logs here:
+        console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
+        // ... (rest of your API endpoint logs using ${PORT})
+    });
+}).catch(err => {
+    // This executes ONLY if the database connection failed
+    console.error('❌ Server startup failed due to database error. Exiting process.', err);
+    process.exit(1);   
+});
     
     // 🚨 FIX: This line MUST use the ${PORT} variable to show the correct running port.
     console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
