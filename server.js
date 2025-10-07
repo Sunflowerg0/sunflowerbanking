@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer'); 
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 // NEW: Use express.json() middleware for parsing JSON bodies in API requests
 app.use(express.json());
 
