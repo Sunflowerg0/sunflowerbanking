@@ -3454,14 +3454,19 @@ app.get('/dashboard', (req, res) => {
 
 // --- SERVER START ---
 app.listen(PORT, () => {
+    // ROCKET: Shows the actual port the server is bound to (e.g., 46361)
     console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
-    console.log('✅ Frontend Available at: http://localhost:3000/');
+    
+    // FIX: Use the actual PORT variable here instead of the hardcoded 8080.
+    console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
+    
+    // All API endpoints now correctly use the actual PORT
     console.log(`Client API Endpoint (POST): http://localhost:${PORT}/api/users`);
-    console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`); // Added console log for user login
+    console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`);
     console.log(`Admin Login API: http://localhost:${PORT}/api/admins/login`);
     console.log(`Fund Transfer API: http://localhost:${PORT}/api/funds/transfer (PROTECTED)`);
     console.log(`Card Generation API (ADMIN): http://localhost:${PORT}/api/cards/generate (PROTECTED)`);
-    console.log(`Transaction Status Update API (ADMIN/PUT): http://localhost:${PORT}/api/transactions/:transactionId/status (PROTECTED)`);
+    console.log(`Transaction Status Update API (ADMIN/PUT): http://localhost:${PORT}/api/transactions/:transactionId/status (PROTECTED)`);
     console.log(`🚨 JWT Secret Loaded: ${JWT_SECRET ? 'YES' : 'NO'}`);
     console.log('------------------------------------------------------------');
 });
