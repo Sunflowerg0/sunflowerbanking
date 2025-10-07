@@ -3412,6 +3412,7 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
         res.status(500).json({ success: false, message: 'Server error during deposit submission.' });
     }
 });
+
 // ------------------------------------------------------------
 // 🚨🚨 CRITICAL FIX: MOVE STATIC FILE SERVING TO THE VERY END 🚨🚨
 // ------------------------------------------------------------
@@ -3484,18 +3485,17 @@ app.get('/dashboard', (req, res) => {
 // This MUST come AFTER all API routes and explicit routes like app.get('/')
 app.use(express.static(path.join(__dirname))); 
 
-
-// ----------------------------------------------------------------------------------
 // --- SERVER START LOGIC (LAST THING IN THE FILE) ---
-// ----------------------------------------------------------------------------------
 const PORT = process.env.PORT || 8080;
 
 connectDB().then(() => {
     // This executes ONLY if the database connection was successful
-    app.listen(PORT, () => {
+    
+    // FIX: Listen on '0.0.0.0' to ensure the server is accessible by the PXXL/Cloudflare proxy.
+    app.listen(PORT, '0.0.0.0', () => { 
         // --- ALL Console Logs MUST be inside this app.listen callback ---
         
-        console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
+        console.log(`\n🚀 Node.js/Express Server listening on http://0.0.0.0:${PORT}`);
         console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
         
         // Console logs for API endpoints
