@@ -1,0 +1,2645 @@
+// 1. Load environment variables from .env file FIRST
+require('dotenv').config(); // 👈 Load .env file
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors'); 
+const path = require('path');
+const mongoose = require('mongoose');
+const fs = require('fs');
+const bcrypt = require('bcrypt'); 
+const SALT_ROUNDS = 10; 
+const jwt = require('jsonwebtoken'); 
+const crypto = require('crypto');   
+const nodemailer = require('nodemailer'); 
+
+const app = express();
+const PORT = 3000;
+
+// NEW: Use express.json() middleware for parsing JSON bodies in API requests
+app.use(express.json());
+
+// --- MONGODB CONNECTION SETUP ---
+// 2. Retrieve URI and JWT Secret from environment variables
+const MONGODB_URI = process.env.MONGODB_URI;
+const JWT_SECRET = process.env.JWT_SECRET;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+
+// Check if URI is available
+if (!MONGODB_URI) {
+    console.error('❌ FATAL ERROR: MONGODB_URI not found in .env file!');
+    process.exit(1); // Exit the process if the connection string is missing
+}
+// 🚨 NEW: Check if JWT Secret is available
+if (!JWT_SECRET) {
+    console.error('❌ FATAL ERROR: JWT_SECRET not found in .env file!');
+    process.exit(1); 
+}
+
+mongoose.connect(MONGODB_URI) 
+    .then(() => console.log('✅ MongoDB Connected to the Sunflower Banking Database!')) 
+    .catch(err => console.error('❌ MongoDB Connection Error:', err));
+
+// --- 1. EMAIL TRANSPORT SETUP ---
+// Configuration to connect to an SMTP service (e.g., Gmail using an App Password)
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+    port: process.env.EMAIL_PORT || 465,
+    secure: process.env.EMAIL_PORT == 465 || true, 
+    auth: {
+        user: process.env.EMAIL_USER, 
+        pass: process.env.EMAIL_PASS, 
+    },
+});
+
+// --- MONGOOSE SCHEMAS AND MODELS ---
+// 1. User/Client Account Schemas (Updated for UserID Name and Password)
+const accountSchema = new mongoose.Schema({
+    currencyCode: { type: String, required: true },
+    accountNumber: { type: String, required: true, unique: true },
+    domesticRouting: { type: String, required: true },
+    iban: { type: String },
+    domesticLabel: { type: String },
+    balance: { type: Number, default: 0.00 },
+    swift: { type: String },
+    // 🚨 UPDATED: Added account type to distinguish checking/savings
+    accountType: { type: String, required: true, enum: ['Checking', 'Savings'] }
+}, { _id: false });
+
+const messageSubSchema = new mongoose.Schema({
+    isActive: { type: Boolean, default: false },
+    messageContent: { type: String, default: '', trim: true },
+    lastUpdatedByAdmin: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }, // Optional: If you track admin ID
+    lastUpdatedAt: { type: Date }
+}, { _id: false });
+
+const transferMessageSchema = new mongoose.Schema({
+    isActive: { 
+        type: Boolean, 
+        default: false 
+    },
+    messageContent: { 
+        type: String, 
+        trim: true,
+        default: ''
+    },
+    // Tracking who set it and when
+    lastUpdatedByAdmin: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'Admin',
+        default: null
+    },
+    lastUpdatedAt: {
+        type: Date,
+        default: Date.now
+    }
+}, { _id: false });
+
+
+// --- USER SCHEMA DEFINITION ---
+
+const userSchema = new mongoose.Schema({
+    // --- PRIMARY IDENTIFIERS ---
+    userIdName: { 
+        type: String, 
+        required: true, 
+        unique: true, 
+        trim: true, 
+        minlength: 5, 
+        set: (v) => v.toLowerCase() // Keeps the unique index functional and consistent
+    }, 
+    
+    // --- NEW FIELD: Added 'email' for communication and unique identity ---
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
+        lowercase: true,
+        validate: {
+            // Simple regex for basic email format validation
+            validator: function(v) {
+                return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
+            },
+            message: props => `${props.value} is not a valid email address!`
+        }
+    },
+
+    // --- SECURITY & AUTHENTICATION ---
+    passwordHash: { type: String, required: true }, 
+    transferPinHash: { type: String, required: true },
+    // 🚨 CRITICAL FIX: Updated field names to match application logic
+    otpHash: { type: String, default: null },
+    otpExpiration: { type: Date, default: null },
+    
+    // --- PERSONAL DETAILS ---
+    fullName: { type: String, required: true },
+    dob: { type: Date, required: true },
+    gender: { type: String }, // Optional, can be made into an enum
+    address: { type: String, required: true },
+    occupation: { type: String, required: true },
+    profilePicturePath: { type: String, default: null },
+    
+    // --- FINANCIAL/APP DATA ---
+    accounts: [accountSchema], 
+    transferMessage: {
+        type: transferMessageSchema,
+        default: () => ({ isActive: false, messageContent: '' }) // Defaults to an inactive message object
+    },
+
+    announcementMessage: { 
+        type: messageSubSchema, 
+        default: () => ({ isActive: false, messageContent: '' }) 
+    },
+
+    // --- SYSTEM/METADATA ---
+    createdAt: { type: Date, default: Date.now },
+    status: { type: String, default: 'Active' },
+    currency: { type: String, required: true },
+    // Added 'role' with default 'User' for authorization 
+    role: {
+        type: String,
+        required: true,
+        default: 'User',
+        enum: ['User', 'Admin', 'Support'] // Example roles
+    },
+});
+
+const User = mongoose.model('User', userSchema);
+
+
+// 2. ADMIN ACCOUNT Schema
+const adminSchema = new mongoose.Schema({
+    fullName: { type: String, required: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true }, 
+    passwordHash: { type: String, required: true }, 
+    role: { type: String, default: 'BasicAdmin' },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Admin = mongoose.model('Admin', adminSchema); 
+
+// 2. CARD Schema (Provided by user)
+const cardSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    cardHolderName: { type: String, required: true, uppercase: true },
+    cardNumber: { type: String, required: true, unique: true }, // Stored without spaces
+    expiryDate: { type: String, required: true }, // MM/YY format
+    cvv: { type: String, required: true },
+    // Metadata for admin tracking
+    generatedByAdmin: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', required: true },
+    generatedAt: { type: Date, default: Date.now },
+    status: { type: String, default: 'Active', enum: ['Active', 'Suspended', 'Cancelled'] }
+}, { collection: 'cards' });
+
+const Card = mongoose.model('Card', cardSchema);
+
+// 4. Transaction Schema (UPDATED: Added status, lastUpdatedByAdmin, and updatedAt)
+const transactionSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    date: { type: Date, default: Date.now },
+    // This 'amount' field MUST be signed: positive (+) for Credits, negative (-) for Debits.
+    amount: { type: Number, required: true }, 
+    description: { type: String, required: true },
+    accountNumber: { type: String, required: true },
+    accountType: { type: String, required: true, enum: ['Checking', 'Savings'] },
+    referenceId: { type: String, unique: true }, // For external tracking/receipts
+    
+    // --- NEW FIELDS ADDED FOR STATUS MANAGEMENT ---
+    status: { 
+        type: String, 
+        required: true, // Status should always be defined
+        default: 'Pending', 
+        enum: ['Pending', 'Processing', 'Approved', 'Successful', 'Delivered', 'Refunded', 'Failed', 'Declined'] 
+    },
+    // Renamed from 'adminProcessedBy' for clarity and consistency with PUT route logic
+    lastUpdatedByAdmin: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }, 
+    updatedAt: { type: Date, default: Date.now } // Tracks the last time status/other field was updated
+    // --- END NEW FIELDS ---
+});
+
+const Transaction = mongoose.model('Transaction', transactionSchema);
+
+// ----------------------------------------------------
+// --- NEW ACCOUNT GENERATION & RETRY LOGIC (FIX) ---
+// ----------------------------------------------------
+
+/** Helper function to introduce a small delay */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Generates account details, retrying the generation until a number 
+ * unique across all users in the database is confirmed.
+ * This prevents E11000 errors on the 'accountNumber' unique index.
+ */
+async function generateUniqueAccountDetails(User, currency, type, initialBalance) {
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10; // Increased attempts for higher confidence in uniqueness
+
+    while (attempts < MAX_ATTEMPTS) {
+        // 1. Use the existing synchronous logic to create an account object
+        const accountDetails = generateAccountDetails(currency, type, initialBalance);
+        const newAccountNumber = accountDetails.accountNumber;
+        
+        // 2. Check if the generated account number already exists in *any* user's accounts array
+        const existingUser = await User.findOne({
+            'accounts.accountNumber': newAccountNumber
+        }).select('_id').lean().exec();
+
+        if (!existingUser) {
+            // Success: Number is unique, return the complete account object
+            return accountDetails;
+        }
+
+        // Failure: Collision detected. Log and retry.
+        console.warn(`[Collision] Account number ${newAccountNumber} already exists. Retrying... (Attempt ${attempts + 1})`);
+        attempts++;
+        await sleep(50 * attempts); // Exponential backoff in wait time
+    }
+
+    // If we fail after max attempts, throw an error to trigger the 500 response
+    throw new Error('Failed to generate a unique bank account number after maximum attempts.');
+}
+
+
+// ----------------------------------------------------------------------------------
+// --- MIDDLEWARE SETUP (CORS, Static Files, Multer, Helpers) (Existing code) ---
+// ----------------------------------------------------------------------------------
+
+// Helper for random number generation
+const getRandomAmount = (min, max) => {
+    return (Math.random() * (max - min) + min).toFixed(2);
+};
+
+// Helper for random description generation (uses the request body pattern if provided)
+const getRandomDescription = (isCredit, descriptionPattern = "Mock Transaction at Merchant X") => {
+    const merchants = ["Amazon", "Walmart", "Starbucks", "Gas Station", "Payroll"];
+    const descriptions = [
+        "Payment to", "Purchase from", "Transfer to", "ATM Withdrawal", "Deposit from"
+    ];
+
+    if (isCredit) {
+        return `Deposit: ${descriptions[4]} Company Y`;
+    }
+    
+    // Debit transaction
+    const baseDesc = descriptionPattern.replace('Merchant X', merchants[Math.floor(Math.random() * merchants.length)]);
+    return `${descriptions[Math.floor(Math.random() * 3)]} ${baseDesc}`;
+};
+
+// Helper for generating a random date between two Date objects
+const getRandomDate = (start, end) => {
+    // Convert dates to timestamps (milliseconds)
+    const startTime = start.getTime();
+    const endTime = end.getTime();
+    
+    // Generate a random timestamp within the range
+    const randomTime = startTime + Math.random() * (endTime - startTime);
+    
+    return new Date(randomTime);
+};
+// 1. CORS
+app.use(cors());
+
+// 2. Multer Setup for handling files (multipart/form-data)
+const uploadsDir = path.join(__dirname, 'uploads/');
+// Ensure the uploads directory exists
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage: storage }); 
+
+// 3. Helper to generate mock account details (Existing logic)
+// 🚨 NOTE: This function is now used by generateUniqueAccountDetails to create a candidate object.
+const generateAccountDetails = (currencyCode, accountType, initialBalance = 0.00) => {
+    let accountNumber = '';
+    let domesticRouting = ''; 
+    let iban = '';
+    let swiftCode = '';
+    
+    const currencyConfig = {
+        'USD': { domesticLabel: 'ABA Routing Number', ibanPrefix: '', swift: 'BANKUSNY' },
+        'EUR': { domesticLabel: 'IBAN', ibanPrefix: 'DE', swift: 'BANKDEFF' },
+        'GBP': { domesticLabel: 'Sort Code', ibanPrefix: 'GB', swift: 'BANKGB2L' },
+        'AUD': { domesticLabel: 'BSB Number', ibanPrefix: 'AU', swift: 'BANKAU2S' },
+        'CAD': { domesticLabel: 'Transit/Institution No.', ibanPrefix: 'CA', swift: 'BANKCA3V' }
+    };
+
+    const c = currencyConfig[currencyCode] || {};
+    swiftCode = c.swift;
+
+    const generateRandomNumber = (length) => {
+        let result = '';
+        const characters = '0123456789';
+        for (let i = 0; i < length; i++) {
+            result += characters.charAt(Math.floor(Math.random() * characters.length));
+        }
+        return result;
+    };
+
+    // Use the account type to create a slight variation in the account number for clarity
+    const typePrefix = accountType === 'Checking' ? '1' : (accountType === 'Savings' ? '5' : '9');
+    const seed = Date.now().toString().slice(-4); 
+
+    switch (currencyCode) {
+        case 'USD':
+            accountNumber = typePrefix + generateRandomNumber(5) + seed; // 1xxxx xxxx or 5xxxx xxxx
+            domesticRouting = generateRandomNumber(9);
+            iban = `N/A (Wire Routing: ${domesticRouting})`;
+            break;
+        case 'EUR':
+            domesticRouting = 'N/A (Covered by IBAN)';
+            accountNumber = typePrefix + generateRandomNumber(5) + seed;
+            iban = c.ibanPrefix + generateRandomNumber(18) + seed.substring(0,2);
+            break;
+        case 'GBP':
+            accountNumber = typePrefix + generateRandomNumber(3) + seed;
+            domesticRouting = generateRandomNumber(2) + '-' + generateRandomNumber(2) + '-' + generateRandomNumber(2);
+            iban = c.ibanPrefix + generateRandomNumber(20);
+            break;
+        case 'AUD':
+            accountNumber = typePrefix + generateRandomNumber(4) + seed;
+            domesticRouting = generateRandomNumber(3) + '-' + generateRandomNumber(3);
+            iban = c.ibanPrefix + generateRandomNumber(20);
+            break;
+        case 'CAD':
+            accountNumber = typePrefix + generateRandomNumber(2) + seed;
+            domesticRouting = generateRandomNumber(5) + ' / ' + generateRandomNumber(3);
+            iban = `N/A (Transit: ${domesticRouting.split(' / ')[0]})`;
+            break;
+        default:
+            accountNumber = typePrefix + generateRandomNumber(11);
+            domesticRouting = 'N/A';
+            iban = 'N/A';
+    }
+
+    return { 
+        currencyCode,
+        accountNumber, 
+        domesticRouting, 
+        iban,
+        domesticLabel: c.domesticLabel,
+        swift: swiftCode,
+        balance: initialBalance, // 🚨 Now uses the initialBalance argument
+        accountType // 🚨 Added accountType
+    };
+};
+
+// 4. Helper function to remove a profile picture file
+const deleteProfilePicture = (filePath) => {
+    if (filePath && filePath.startsWith('/uploads/')) {
+        const fullPath = path.join(__dirname, filePath);
+        fs.unlink(fullPath, (err) => {
+            if (err) console.error(`Failed to delete old file: ${fullPath}`, err);
+            else console.log(`🗑️ Successfully deleted old profile picture: ${fullPath}`);
+        });
+    }
+};
+
+/**
+ * Sends the generated OTP via email with a responsive template.
+ */
+async function sendOtpEmail(recipientEmail, otp) {
+    const mailOptions = {
+        from: `Sunflower Bank Security <${process.env.EMAIL_USER}>`,
+        to: recipientEmail,
+        subject: 'Sunflower Bank: Your Secure Login Code',
+        html: `
+            <!-- Main Responsive Container -->
+            <div style="
+                font-family: Arial, sans-serif; 
+                padding: 15px; 
+                border: 1px solid #ddd; 
+                max-width: 450px; 
+                width: 90%; 
+                margin: auto; 
+                border-radius: 6px; 
+                border-top: 4px solid #ffcb05; 
+                box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            ">
+                <div style="text-align: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+                    <!-- Sunflower Bank Logo -->
+                    <img src="https://i.imgur.com/Q6dsATF.png" alt="Sunflower Bank Logo" style="width: 150px; height: auto;">
+                </div>
+                
+                <h1 style="color: #0076a3; font-size: 22px; text-align: center; margin-top: 0; margin-bottom: 15px;">
+                    One-Time Verification Code
+                </h1>
+                
+                <p style="font-size: 15px; color: #333; text-align: center; line-height: 1.5;">
+                    Use the code below to complete your login securely:
+                </p>
+                
+                <!-- OTP Code Block -->
+                <div style="
+                    background-color: #0076a3; 
+                    padding: 15px 10px; 
+                    border-radius: 6px; 
+                    text-align: center; 
+                    margin: 25px 0;
+                ">
+                    <h2 style="
+                        font-size: 32px; 
+                        color: white; 
+                        font-weight: bold; 
+                        margin: 0; 
+                        letter-spacing: 4px;
+                    ">${otp}</h2>
+                </div>
+                
+                <p style="margin-top: 20px; font-size: 13px; color: #777; line-height: 1.4;">
+                    This code is valid for **10 minutes**. For your security, **do not share this code** with anyone, including bank employees.
+                </p>
+                
+                <p style="font-size: 11px; color: #aaa; margin-top: 25px; text-align: center; border-top: 1px solid #eee; padding-top: 10px;">
+                    If you did not request this login, please contact support immediately.
+                </p>
+            </div>
+        `,
+    };
+
+    try {
+        // FIX: Send the actual email
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`✅ Real OTP Email Sent: %s to ${recipientEmail}`, info.messageId);
+        
+        // REMOVED: console.log(`Email sent successfully (simulated) to ${recipientEmail}`);
+    } catch (error) {
+        console.error(`❌ ERROR: Failed to send OTP email to ${recipientEmail}. Check NodeMailer/SMTP config.`, error);
+        // Throw an error to be caught by the main login route, preventing login continuation
+        throw new Error('Failed to send verification code. Please contact support.');
+    }
+}
+// Helper function to mask the email address for security display (e.g., m***e@gmail.com)
+function maskEmail(email) {
+    if (!email) return 'N/A';
+    const parts = email.split('@');
+    if (parts.length !== 2) return email;
+
+    const localPart = parts[0];
+    const domainPart = parts[1];
+
+    if (localPart.length <= 3) return localPart[0] + '***@' + domainPart;
+    
+    // Mask the local part: first char + *** + last char
+    const maskedLocal = localPart.substring(0, 1) + '***' + localPart.substring(localPart.length - 1);
+    
+    return maskedLocal + '@' + domainPart;
+}
+
+/**
+ * Generates a random 6-digit OTP, hashes it, saves it to the DB with expiry, and sends the email.
+ */
+async function generateAndSendOtp(user) {
+    // Generate a random 6-digit number
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const otpExpiration = new Date(Date.now() + 10 * 60 * 1000); // OTP expires in 10 minutes
+
+    // 1. Hash the OTP before saving (ALWAYS hash sensitive data)
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(otp, salt);
+
+    // 2. Save the hashed OTP and expiry to the user document
+    // NOTE: Your User Model must have 'otpHash' (String) and 'otpExpiration' (Date) fields
+    user.otpHash = hashedOtp;
+    user.otpExpiration = otpExpiration;
+    
+    // CRITICAL FIX: Persist the changes to the database immediately.
+    // This is the step that resolves the "No pending OTP" error.
+    await user.save(); 
+    console.log(`✅ Real OTP Database Saved: OTP hash and 10-minute expiry stored for ${user.userIdName}.`);
+
+
+    // 3. Send the PLAIN TEXT OTP via email
+    // You should ensure your 'sendOtpEmail' function is properly implemented.
+    await sendOtpEmail(user.email, otp);
+    console.log(`✅ OTP Email Sent to ${user.email}.`);
+
+
+    return true; // Indicates success
+}
+
+// -----------------------------
+// --- JWT AUTHENTICATION MIDDLEWARE ---
+// -----------------------------
+
+/**
+ * Middleware to verify a JWT from the 'Authorization' header.
+ * Attaches the decoded admin payload to req.admin if valid.
+ */
+const verifyAdminToken = (req, res, next) => {
+    // 1. Check for the token in the header
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        console.log('❌ Auth Failed: Missing Authorization header.');
+        return res.status(401).json({ success: false, message: 'Access Denied. No token provided.' });
+    }
+
+    // Expected format: "Bearer [TOKEN]"
+    const token = authHeader.split(' ')[1]; 
+    if (!token) {
+        console.log('❌ Auth Failed: Token format invalid.');
+        return res.status(401).json({ success: false, message: 'Access Denied. Invalid token format.' });
+    }
+
+    // 2. Verify the token using the secret
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        // Attach the decoded admin payload to the request for use in routes
+        req.admin = decoded; 
+        // NOTE: The previous version also checked for req.admin.id but the JWT payload
+        // should contain the id, so we ensure it's available for card generation
+        req.admin.id = decoded.id || decoded._id; 
+        console.log(`✅ Token Verified for Admin: ${req.admin.email}`);
+        next(); // Proceed to the next middleware/route handler
+    } catch (ex) {
+        // This catches errors like 'invalid signature', 'jwt malformed', and 'jwt expired'
+        console.log('❌ Auth Failed: JWT verification failed.', ex.message);
+        // Explicitly set 401 for unauthorized access
+        return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
+    }
+};
+
+/**
+ * Generates a JSON Web Token (JWT) for a successful user login.
+ * Uses the globally available JWT_SECRET.
+ * @param {Object} user - The Mongoose user document containing _id, userIdName, and role.
+ * @returns {string} The signed JWT token.
+ */
+function generateClientToken(user) {
+    // 1. Define the payload (claims) - include only necessary, non-sensitive data
+    const payload = {
+        userId: user._id, // MongoDB object ID
+        userIdName: user.userIdName,
+        role: user.role,
+        fullName: user.fullName 
+    };
+
+    // 2. Sign the token
+    const token = jwt.sign(
+        payload, 
+        JWT_SECRET, // Your secret key (now globally available)
+        { expiresIn: '1d' } // Token expires in 24 hours
+    );
+
+    return token;
+}
+
+/**
+ * Middleware to verify a JWT from the 'Authorization' header for a CLIENT.
+ * Uses the globally available JWT_SECRET.
+ */
+const verifyClientToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ success: false, message: 'Access Denied. No token provided.' });
+    }
+
+    const token = authHeader.split(' ')[1]; 
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Access Denied. Invalid token format.' });
+    }
+
+    try {
+        // Use globally available jwt object and JWT_SECRET
+        const decoded = jwt.verify(token, JWT_SECRET);
+        
+        // Assuming role is stored as 'User'
+        if (decoded.role !== 'User') { 
+             return res.status(403).json({ success: false, message: 'Forbidden. Admin token cannot access client routes.' });
+        }
+        
+        // 🚀 CRITICAL FIX: Explicitly assign the properties.
+        // The transfer routes demand req.user.id. We use fallback to cover common keys.
+        req.user = {
+            // Check for the ID in common keys: 'id', '_id', or 'userId'
+            id: decoded.id || decoded._id || decoded.userId, 
+            userIdName: decoded.userIdName || decoded.username, // Use username if userIdName is missing
+            role: decoded.role
+        };
+        
+        // Update the log to confirm the ID we are setting
+        console.log(`✅ Client Token Verified for User: ${req.user.userIdName} (ID: ${req.user.id})`);
+        next();
+    } catch (ex) {
+        console.log('❌ Client Auth Failed: JWT verification failed.', ex.message);
+        return res.status(401).json({ success: false, message: 'Invalid or expired client token.' });
+    }
+};
+
+// --- OTP / 2FA HELPER FUNCTIONS ---
+
+// Generates a random 6-digit OTP
+function generateOTP() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+/**
+ * Simulates sending the OTP to the user's registered email.
+ * In a real app, this would use a service like SendGrid, Nodemailer, etc.
+ * @param {string} email - The user's email address (simulated as userIdName@sunflowerbank.com)
+ * @param {string} otp - The generated OTP code
+ */
+function sendOTPEmail(email, otp) {
+    console.log(`\n📧 SIMULATED EMAIL SEND:`);
+    console.log(`   TO: ${email}`);
+    console.log(`   SUBJECT: Your One-Time Password (OTP)`);
+    console.log(`   BODY: Your security code is ${otp}. It expires in 5 minutes.`);
+    console.log('------------------------------------------');
+    // NOTE: For a real application, implement actual email sending here.
+}
+// ------------------------------------------------------------------------------------------------
+
+// ----------------------------------------------------------------------------------
+// --- API ROUTES ---
+// ----------------------------------------------------------------------------------
+
+
+// Helper to format currency consistently for the email content
+const formatCurrency = (amount, currencyCode = 'USD') => {
+    try {
+        const numberAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+        if (isNaN(numberAmount)) return `${currencyCode} 0.00`;
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currencyCode,
+        }).format(numberAmount);
+    } catch (e) {
+        return `${currencyCode} ${amount.toFixed(2)}`;
+    }
+};
+
+// 2. Email Sending Function
+async function sendTransferNotification(userEmail, transactionDetails) {
+    console.log(`\nAttempting to send notification email to: ${userEmail}`);
+    
+    const mailOptions = {
+        from: '"Sunflower Bank" <no-reply@sunflowerbank.com>',
+        to: userEmail,
+        subject: `Transaction Alert: Funds Transferred (${transactionDetails.formattedAmount})`,
+        html: `
+            <p style="font-family: sans-serif;">Dear Customer,</p>
+            <p style="font-family: sans-serif;">This confirms your recent transfer has been processed successfully.</p>
+            <div style="border: 1px solid #ffc42a; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                <p style="font-family: sans-serif; font-weight: bold; color: #0076a3;">Transaction Summary</p>
+                <ul style="list-style-type: none; padding: 0;">
+                    <li><strong>Amount:</strong> ${transactionDetails.formattedAmount}</li>
+                    <li><strong>Source Account:</strong> ${transactionDetails.sourceAccountNumber}</li>
+                    <li><strong>Recipient:</strong> ${transactionDetails.destinationName}</li>
+                    <li><strong>Transfer Type:</strong> ${transactionDetails.transferType}</li>
+                    <li><strong>Reference ID:</strong> ${transactionDetails.referenceId}</li>
+                    <li><strong>New Source Balance:</strong> ${transactionDetails.newBalance}</li>
+                </ul>
+            </div>
+            <p style="font-family: sans-serif; margin-top: 20px;">Thank you for banking with Sunflower Bank.</p>
+        `,
+    };
+
+    try {
+        // Use the conceptual transporter to send the email
+        await transporter.createTransport.sendMail(mailOptions);
+        console.log(`✅ Email notification successfully sent to ${userEmail}.`);
+    } catch (error) {
+        console.error(`❌ ERROR: Failed to send transfer confirmation email to ${userEmail}.`, error);
+        // Important: Do not return an error status here; the transaction is already committed.
+    }
+}
+
+// POST /api/users - Register New User (Client)
+app.post('/api/users', upload.single('profilePicture'), async (req, res) => {
+    // Destructure all expected fields for clarity and consistent validation
+    const { 
+        userIdName, userPassword, fullName, email, dob, gender, 
+        address, occupation, transferPin, currency 
+    } = req.body;
+    
+    const profileFile = req.file; 
+    
+    console.log(`\n--- Received Data for New User (${fullName}) ---`);
+    console.log('User ID Name:', userIdName, 'Email:', email);
+
+    // --- SERVER-SIDE VALIDATION ---
+    const requiredFields = { userIdName, userPassword, fullName, email, dob, address, occupation, transferPin, currency };
+    
+    for (const key in requiredFields) {
+        if (!requiredFields[key]) {
+            if (profileFile) fs.unlinkSync(profileFile.path); 
+            return res.status(400).json({ success: false, message: `Missing required field: ${key}` });
+        }
+    }
+    
+    if (userIdName.length < 5) {
+        if (profileFile) fs.unlinkSync(profileFile.path); 
+        return res.status(400).json({ success: false, message: 'User ID Name must be at least 5 characters long.' });
+    }
+    
+    if (userPassword.length < 8) {
+        if (profileFile) fs.unlinkSync(profileFile.path); 
+        return res.status(400).json({ success: false, message: 'User Password must be at least 8 characters long.' });
+    }
+
+    if (!/^\d{4}$/.test(transferPin)) {
+        if (profileFile) fs.unlinkSync(profileFile.path);
+        return res.status(400).json({ success: false, message: 'Transfer PIN must be exactly 4 numeric digits.' });
+    }
+    
+    // Basic Email format validation 
+    if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
+        if (profileFile) fs.unlinkSync(profileFile.path);
+        return res.status(400).json({ success: false, message: 'Invalid email address format.' });
+    }
+
+    // --- DATA PROCESSING & REAL MONGO DB SAVE ---
+    try {
+        // 1. Generate secure hashes using bcrypt
+        const passwordHash = await bcrypt.hash(userPassword, SALT_ROUNDS);
+        const transferPinHash = await bcrypt.hash(transferPin, SALT_ROUNDS);
+        
+        // 2. Generate two unique accounts (Checking and Savings)
+        console.log('Generating unique Checking Account...');
+        const checkingAccount = await generateUniqueAccountDetails(User, currency, 'Checking', 100.00); 
+        
+        console.log('Generating unique Savings Account...');
+        const savingsAccount = await generateUniqueAccountDetails(User, currency, 'Savings', 500.00); 
+
+        // 3. Create the new User document object
+        const newUser = new User({
+            userIdName: userIdName, 
+            email: email, // <-- ADDED EMAIL HERE
+            passwordHash: passwordHash, 
+            transferPinHash: transferPinHash,
+            
+            fullName: fullName,
+            dob: new Date(dob), // Ensure it's stored as a Date
+            gender: gender,
+            address: address,
+            occupation: occupation,
+            
+            profilePicturePath: profileFile ? `/uploads/${profileFile.filename}` : null,
+            accounts: [checkingAccount, savingsAccount],
+            currency: currency, 
+            role: 'User' // Explicitly set role
+        });
+        
+        // 🔑 VERIFICATION LOG: Check that Mongoose has applied the default nulls for 2FA fields
+        console.log('New User Object before Save (Check for otpSecret/otpExpiry):', {
+            userIdName: newUser.userIdName,
+            email: newUser.email,
+            otpSecret: newUser.otpSecret, 
+            otpExpiry: newUser.otpExpiry, 
+            role: newUser.role 
+        });
+
+
+        // 4. Save to MongoDB 
+        const savedUser = await newUser.save();
+        
+        console.log('\n✅ User Successfully Created & Stored (MongoDB Save)');
+        console.log('New User ID Name:', savedUser.userIdName); 
+        console.log(`Accounts Created: Checking (${checkingAccount.accountNumber}) and Savings (${savingsAccount.accountNumber})`);
+        console.log('------------------------------------------------------------');
+        
+        // 5. Generate JWT for immediate login
+        const token = jwt.sign(
+            { id: savedUser._id, role: savedUser.role, userIdName: savedUser.userIdName }, 
+            JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
+
+
+        // 6. Send Success Response to Client
+        res.status(201).json({ 
+            success: true, 
+            message: 'User account created and activated successfully.',
+            userId: savedUser._id,
+            accounts: savedUser.accounts,
+            token // Include token for auto-login after successful registration
+        });
+
+    } catch (dbError) {
+        // Handle file cleanup
+        if (profileFile) fs.unlinkSync(profileFile.path); 
+        
+        console.error('MongoDB Save Error (User):', dbError);
+        
+        if (dbError.code === 11000) {
+            const key = Object.keys(dbError.keyValue)[0];
+            const value = dbError.keyValue[key];
+            
+            let msg = 'Database conflict occurred. Please retry.';
+            if (key === 'userIdName') {
+                // --- FIX: Explicitly check for 'userIdName' duplication
+                msg = `The User ID Name '${value}' is already taken. Please choose a different one.`;
+            } else if (key === 'email') { 
+                // --- FIX: Explicitly check for 'email' duplication
+                msg = `The email address '${value}' is already registered to an account.`;
+            } else {
+                 msg = 'A unique constraint was violated (e.g., account number collision). Please retry the request.';
+            }
+
+            return res.status(409).json({
+                success: false,
+                message: msg
+            });
+        }
+        
+        // Handle Mongoose validation error (e.g., required fields, email format)
+        if (dbError.name === 'ValidationError') {
+             return res.status(400).json({ success: false, message: `Validation failed: ${dbError.message}` });
+        }
+
+        // Handle the error thrown by generateUniqueAccountDetails if max attempts were reached
+        if (dbError.message.includes('unique bank account number')) {
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Internal Error: Could not generate a unique account number after multiple attempts. Please try again later.' 
+            });
+        }
+        
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Database error during account creation. See server console.' 
+        });
+    }
+});
+
+// --------------------------------------------------
+// --- API for VIEW ALL USERS (view-user-account) ---
+// --------------------------------------------------
+// 🚨 PROTECTED ROUTE
+app.get('/api/users', verifyAdminToken, async (req, res) => {
+    console.log('\n--- Received Request to View All Users ---');
+    try {
+        // Fetch all user documents, excluding sensitive fields (including new 2FA fields)
+        const users = await User.find().select('-passwordHash -transferPinHash -otpSecret -otpExpiry -__v');
+        
+        console.log(`✅ Fetched ${users.length} users successfully.`);
+        res.status(200).json(users);
+
+    } catch (error) {
+        console.error('Error fetching all users:', error);
+        res.status(500).json({ success: false, message: 'Failed to retrieve users from the database.' });
+    }
+});
+
+// --- API for VIEW SINGLE USER (FIXED for Manage Funds UI) ---
+// 🚨 PROTECTED ROUTE
+app.get('/api/users/:id', verifyAdminToken, async (req, res) => {
+    const { id } = req.params;
+    console.log(`\n--- Received GET Request for User ID: ${id} (FIXED) ---`);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
+
+    try {
+        // Exclude all sensitive fields, including the new 2FA fields
+        const user = await User.findById(id).select('-passwordHash -transferPinHash -otpSecret -otpExpiry -__v');
+
+        if (!user) {
+            console.log(`❌ User ID ${id} not found.`);
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        
+        // 🔑 FIX: Normalize accounts from Array to Object for easy frontend access
+       const normalizedAccounts = user.accounts.reduce((acc, account) => {
+    // This loops through the database array and creates the object structure the frontend needs
+    acc[account.accountType.toLowerCase()] = {
+        number: account.accountNumber,
+        balance: account.balance
+    };
+    return acc;
+}, { checking: null, savings: null });
+        // Create the final response object, combining all user fields with the new account structure
+        const responseData = {
+            // Get all standard user fields
+            ...user.toObject(),
+            
+            // Format DOB for the frontend input (if needed)
+            dob: user.dob ? user.dob.toISOString().split('T')[0] : '', 
+
+            // Overwrite the accounts array with the normalized object structure
+            accounts: normalizedAccounts 
+        };
+        
+        delete responseData._id; // Clean up redundant field
+
+        console.log(`✅ User details fetched and normalized successfully for ${user.fullName}.`);
+        
+        // Return the clean, normalized object
+        res.status(200).json(responseData);
+
+    } catch (error) {
+        console.error(`Error fetching user ${id}:`, error);
+        res.status(500).json({ success: false, message: 'Server error while retrieving user data.' });
+    }
+});
+
+// --- API for EDIT USER (edit-user-account & admin-message submission) ---
+// 🚨 PROTECTED ROUTE - CORRECTED LOGIC FOR ANNOUNCEMENT AND ISSUE MESSAGES
+app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), async (req, res) => {
+    const { id } = req.params;
+    const updateData = req.body;
+    const profileFile = req.file;
+
+    console.log(`\n--- Received PUT Request for User ID: ${id} ---`);
+    console.log('Update Data Keys:', Object.keys(updateData));
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (profileFile) fs.unlinkSync(profileFile.path);
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
+
+    try {
+        const user = await User.findById(id);
+        if (!user) {
+            if (profileFile) fs.unlinkSync(profileFile.path);
+            return res.status(404).json({ success: false, message: 'User not found for update.' });
+        }
+
+        let changes = {};
+
+        // Helper function to process and validate message updates
+        const handleMessageUpdate = (messageKey, messageObj) => {
+            if (messageObj) {
+                // Ensure payload contains the expected structure
+                if (typeof messageObj.isActive === 'boolean' && typeof messageObj.messageContent === 'string') {
+                    
+                    // Server-Side Validation: Require content if message is active
+                    if (messageObj.isActive && messageObj.messageContent.trim().length < 5) {
+                        // Throw error to be caught by the outer try-catch block
+                        throw new Error(`${messageKey} content must be at least 5 characters long if active.`);
+                    }
+
+                    changes[messageKey] = {
+                        isActive: messageObj.isActive,
+                        // Clear content if inactive
+                        messageContent: messageObj.isActive ? messageObj.messageContent.trim() : "",
+                        lastUpdatedByAdmin: req.admin.id,
+                        lastUpdatedAt: new Date()
+                    };
+                    console.log(`✅ ${messageKey} config updated by Admin ${req.admin.id}. Active: ${messageObj.isActive}`);
+                } else {
+                    console.warn(`⚠️ Received malformed ${messageKey} payload. Skipping update for this field.`);
+                }
+            }
+        };
+
+        // 1. Handle Password update (Must be hashed)
+        if (updateData.userPassword) {
+            if (updateData.userPassword.length < 8) {
+                if (profileFile) fs.unlinkSync(profileFile.path); 
+                return res.status(400).json({ success: false, message: 'New Password must be at least 8 characters long.' });
+            }
+            changes.passwordHash = await bcrypt.hash(updateData.userPassword, SALT_ROUNDS);
+            console.log('✅ Password hash updated.');
+        }
+
+        // 2. Handle Transfer PIN update (Must be 4 digits and hashed)
+        if (updateData.transferPin) {
+            if (!/^\d{4}$/.test(updateData.transferPin)) {
+                if (profileFile) fs.unlinkSync(profileFile.path);
+                return res.status(400).json({ success: false, message: 'Transfer PIN must be exactly 4 numeric digits.' });
+            }
+            changes.transferPinHash = await bcrypt.hash(updateData.transferPin, SALT_ROUNDS);
+            console.log('✅ Transfer PIN hash updated.');
+        }
+
+        // 3. Handle Profile Picture update
+        if (profileFile) {
+            deleteProfilePicture(user.profilePicturePath);
+            changes.profilePicturePath = `/uploads/${profileFile.filename}`;
+            console.log(`✅ Profile picture uploaded: ${changes.profilePicturePath}`);
+        }
+
+        // 4. Handle Currency/Account Details update
+        if (updateData.currency && updateData.currency !== user.currency) {
+            console.log(`🔄 Currency changed from ${user.currency} to ${updateData.currency}. Regenerating account details...`);
+            
+            // Regenerate both Checking and Savings accounts, preserving current balance
+            const newChecking = generateAccountDetails(updateData.currency, 'Checking', user.accounts.find(a => a.accountType === 'Checking')?.balance || 0.00);
+            const newSavings = generateAccountDetails(updateData.currency, 'Savings', user.accounts.find(a => a.accountType === 'Savings')?.balance || 0.00);
+
+            changes.currency = updateData.currency;
+            changes.accounts = [newChecking, newSavings];
+            console.log(`✅ Account details updated for new currency: ${updateData.currency}`);
+        } else if (updateData.currency && updateData.currency === user.currency) {
+            changes.currency = updateData.currency;
+        }
+        
+        // ----------------------------------------------------------------
+        // 5. Handle Conditional Message Configuration (New Logic)
+        // ----------------------------------------------------------------
+        // Check for the TWO message types sent by the admin panel
+        handleMessageUpdate('announcementMessage', updateData.announcementMessage);
+        handleMessageUpdate('issueMessage', updateData.issueMessage);
+        
+        // ----------------------------------------------------------------
+        // OLD LOGIC CLEANUP: Removed 'updateData.transferMessage' check.
+        // If your frontend still sends 'transferMessage', this section handles its data but saves to the new fields.
+        // If the 'admin-message.html' is the only source, this is correct.
+        // ----------------------------------------------------------------
+        
+        // 6. Handle other fields (non-login/non-file fields)
+        const allowedFields = ['fullName', 'dob', 'gender', 'address', 'occupation', 'status', 'userIdName'];
+        allowedFields.forEach(key => {
+            if (updateData[key] !== undefined && changes[key] === undefined) { 
+                changes[key] = updateData[key];
+            }
+        });
+        
+        if (Object.keys(changes).length === 0) {
+            if (profileFile) fs.unlinkSync(profileFile.path);
+            return res.status(200).json({ success: true, message: 'No substantial changes submitted.' });
+        }
+
+
+        // 7. Perform the MongoDB update
+        const updatedUser = await User.findByIdAndUpdate(id, { $set: changes }, { new: true, runValidators: true }).select('-passwordHash -transferPinHash -__v');
+        
+        if (!updatedUser) {
+            if (profileFile) fs.unlinkSync(profileFile.path);
+            return res.status(500).json({ success: false, message: 'Update failed, user not found after initial check.' });
+        }
+
+        console.log(`✅ User ${id} updated successfully.`);
+        res.status(200).json({ 
+            success: true, 
+            message: `User ${updatedUser.fullName} updated successfully.`,
+            user: updatedUser 
+        });
+
+    } catch (dbError) {
+        // Handle custom validation error from message update helper
+        if (dbError.message.includes('content must be at least 5 characters long')) {
+            if (profileFile) fs.unlinkSync(profileFile.path);
+            return res.status(400).json({ success: false, message: dbError.message });
+        }
+
+        console.error('MongoDB Update Error (User):', dbError);
+        if (profileFile) fs.unlinkSync(profileFile.path); // Clean up file on DB error
+        
+        if (dbError.code === 11000) {
+            const msg = `The User ID Name '${updateData.userIdName}' is already taken.`;
+            return res.status(409).json({ success: false, message: msg });
+        }
+
+        res.status(500).json({ success: false, message: 'Server error during user update.' });
+    }
+});
+
+// GET endpoint to fetch all transactions for a specific user (Admin Protected)
+// URL structure from frontend: /api/transactions/user/:userId
+app.get('/api/transactions/user/:userId', verifyAdminToken, async (req, res) => {
+    const { userId } = req.params;
+
+    console.log(`\n--- Received Fetch Transactions Request for User ID: ${userId} ---`);
+
+    // --- 1. Basic Validation ---
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
+
+    try {
+        // --- 2. Fetch User to ensure existence (optional, but good practice) ---
+        const userExists = await User.exists({ _id: userId });
+        if (!userExists) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        
+        // --- 3. Fetch all Transactions ---
+        const transactions = await Transaction.find({ userId: userId })
+            // Exclude __v, but include all fields required by the frontend
+            .select('-__v') 
+            .sort({ timestamp: -1 }); // Sort by newest first
+
+        // Note: The frontend expects fields like _id, timestamp, accountId, description, amount, status, currency.
+        // We'll trust the Transaction model includes these.
+
+        console.log(`✅ Fetched ${transactions.length} transactions for user ${userId}.`);
+
+        // --- 4. Success Response ---
+        res.status(200).json({
+            success: true,
+            transactions: transactions,
+            count: transactions.length
+        });
+
+    } catch (error) {
+        console.error('Database/Fetch Error (Admin Transactions):', error);
+        res.status(500).json({ success: false, message: 'Server error while retrieving user transactions.' });
+    }
+});
+
+// ------------------------------------------------------------------
+// 1. PUT endpoint to update a transaction's status and reverse funds
+// ------------------------------------------------------------------
+// URL structure from frontend: /api/transactions/:transactionId/status
+app.put('/api/transactions/:transactionId/status', verifyAdminToken, async (req, res) => {
+    const { transactionId } = req.params;
+    const { newStatus } = req.body;
+    const adminId = req.admin.id; // Get admin ID from JWT payload
+
+    console.log(`\n--- Received Transaction Status Update Request ---`);
+    console.log(`TX ID: ${transactionId}, New Status: ${newStatus}, Admin: ${adminId}`);
+
+    // --- 1. Basic Validation ---
+    if (!mongoose.Types.ObjectId.isValid(transactionId)) {
+        return res.status(400).json({ success: false, message: 'Invalid transaction ID format.' });
+    }
+    if (!newStatus) {
+        return res.status(400).json({ success: false, message: 'Missing required field: newStatus.' });
+    }
+
+    const allowedStatuses = ['Pending', 'Processing', 'Approved', 'Successful', 'Delivered', 'Refunded', 'Failed', 'Declined'];
+    const reversalStatuses = ['Refunded', 'Failed', 'Declined'];
+    const completionStatus = 'Successful';
+
+    if (!allowedStatuses.includes(newStatus)) {
+        return res.status(400).json({ success: false, message: `Invalid status value: ${newStatus}.` });
+    }
+
+    // --- 2. Start Mongoose Session (for atomicity) ---
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // --- 3. Fetch Original Transaction (with session) ---
+        const transaction = await Transaction.findById(transactionId).session(session);
+
+        if (!transaction) {
+            await session.abortTransaction();
+            console.log(`❌ Status Update Failed: Transaction ID ${transactionId} not found.`);
+            return res.status(404).json({ success: false, message: 'Transaction not found.' });
+        }
+
+        const currentStatus = transaction.status;
+
+        if (currentStatus === newStatus) {
+             // If status is the same, just return success without further action
+             await session.commitTransaction();
+             return res.status(200).json({
+                 success: true,
+                 message: `Transaction status is already ${newStatus}. No change needed.`,
+                 transactionId: transaction._id,
+                 newStatus: newStatus
+             });
+        }
+
+        const { accountNumber, amount } = transaction; // Use accountNumber from the transaction
+        let accountUpdate = 0;
+
+        // --- 4. Determine Financial Action based on Status Change ---
+
+        // A. Handle REVERSAL (Refunded, Failed, Declined)
+        if (reversalStatuses.includes(newStatus)) {
+             // Check if the transaction was successful (or Approved/Processing) before reversing.
+             // We reverse only if the funds were previously adjusted (i.e., not already failed/refunded/declined).
+             if (!reversalStatuses.includes(currentStatus)) {
+                 // Reversal means returning the funds. The transaction amount is signed:
+                 // If original was Debit (-100), reversal is +100.
+                 // If original was Credit (+100), reversal is -100.
+                 accountUpdate = -amount; 
+                 console.log(`🔄 Reversal detected. Adjusting balance by ${accountUpdate} (negative of original amount) on account ${accountNumber}.`);
+             }
+        } 
+        
+        // B. Handle SUCCESSFUL COMPLETION
+        else if (newStatus === completionStatus) {
+            // Funds adjustment should ONLY happen if the current status was 'Pending'.
+            // If the transaction has reached 'Successful', we assume the amount in the transaction
+            // is the amount that needs to be added (if positive) or subtracted (if negative)
+            // if it wasn't already processed.
+            if (currentStatus === 'Pending' || currentStatus === 'Approved') {
+                 // Adjust the account balance by the transaction amount.
+                 // If amount is +ve (Credit/Deposit), balance increases.
+                 // If amount is -ve (Debit/Withdrawal), balance decreases.
+                 accountUpdate = amount; 
+                 console.log(`⭐ Successful completion detected. Adjusting balance by ${accountUpdate} on account ${accountNumber}.`);
+            }
+        }
+        
+        // C. Apply Account Update (if necessary)
+        if (accountUpdate !== 0) {
+            // 🚨 FIX: Update the balance in the User's accounts subdocument array
+            const updateResult = await User.findOneAndUpdate(
+                // 1. Find the User document that has the correct account number
+                { "accounts.accountNumber": accountNumber },
+                // 2. Increment the balance of the specific subdocument using arrayFilters
+                { $inc: { "accounts.$[elem].balance": accountUpdate } },
+                { 
+                    new: true, 
+                    runValidators: true, 
+                    session, // Ensure the update is part of the transaction
+                    // 3. Filter to target the specific account subdocument by its account number
+                    arrayFilters: [{ "elem.accountNumber": accountNumber }] 
+                }
+            );
+
+            if (!updateResult) {
+                await session.abortTransaction();
+                return res.status(404).json({ success: false, message: `Account with number ${accountNumber} not found for update.` });
+            }
+            // Note: We cannot easily get the new balance for that specific account from updateResult here, 
+            // but we know the atomic update succeeded.
+            console.log(`💰 Account ${accountNumber} balance successfully updated by ${accountUpdate}.`);
+        }
+
+        // --- 5. Update Transaction Status ---
+        const updatedTransaction = await Transaction.findByIdAndUpdate(
+            transactionId,
+            { 
+                $set: { 
+                    status: newStatus,
+                    lastUpdatedByAdmin: adminId, 
+                    updatedAt: new Date()
+                } 
+            },
+            { new: true, runValidators: true, session } // Pass session here
+        ).select('_id status userId');
+
+        if (!updatedTransaction) {
+            await session.abortTransaction();
+            return res.status(500).json({ success: false, message: 'Failed to update transaction status.' });
+        }
+
+        // --- 6. Commit Transaction and End Session ---
+        await session.commitTransaction();
+        
+        console.log(`✅ Atomic Update Success! TX ${updatedTransaction._id} status is now ${updatedTransaction.status}.`);
+
+        // --- 7. Success Response ---
+        res.status(200).json({
+            success: true,
+            message: `Transaction status successfully changed to ${updatedTransaction.status} and balance adjusted (if necessary).`,
+            transactionId: updatedTransaction._id,
+            newStatus: updatedTransaction.status
+        });
+
+    } catch (error) {
+        // --- 8. Abort Transaction on Error ---
+        await session.abortTransaction();
+        console.error('Database/Update Error (Transaction Status Change, Rolled back):', error);
+        res.status(500).json({ success: false, message: 'Server error during transaction status update. Operation rolled back.' });
+    } finally {
+        session.endSession();
+    }
+});
+
+// ----------------------------------------------------
+// --- API for DELETE USER (view-user-account) ---
+// ----------------------------------------------------
+// 🚨 PROTECTED ROUTE
+app.delete('/api/users/:id', verifyAdminToken, async (req, res) => {
+    const { id } = req.params;
+
+    console.log(`\n--- Received DELETE Request for User ID: ${id} ---`);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
+
+    try {
+        // Find the user first to get the profile picture path
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found for deletion.' });
+        }
+        
+        // Proceed with deletion
+        const result = await User.deleteOne({ _id: id });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ success: false, message: 'User not found to delete.' });
+        }
+        
+        // Delete the profile picture file
+        deleteProfilePicture(user.profilePicturePath);
+
+        console.log(`✅ User ${id} deleted successfully. Deleted profile picture if it existed.`);
+        res.status(200).json({ success: true, message: `User ${id} and associated data deleted successfully.` });
+
+    } catch (error) {
+        console.error(`Error deleting user ${id}:`, error);
+        res.status(500).json({ success: false, message: 'Server error during user deletion.' });
+    }
+});
+
+// ------------------------------------
+// --- API for FUND TRANSFER (Credit/Debit) ---
+// ------------------------------------
+// 🚨 NEW PROTECTED ROUTE for manage-user-funds.html
+app.post('/api/funds/transfer', verifyAdminToken, async (req, res) => {
+    // Expected body: { userId, accountNumber, type: 'credit'|'debit', amount, description, adminName }
+    const { userId, accountNumber, type, amount, description } = req.body;
+    // NOTE: req.admin.id and req.admin.email are assumed to be set by verifyAdminToken middleware
+    const adminId = req.admin.id;
+    
+    console.log(`\n--- Received ${type ? type.toUpperCase() : 'FUND'} Request from Admin ${adminId} ---`);
+    console.log(`Details: User ${userId}, Account ${accountNumber}, Amount ${amount}, Reason: ${description}`);
+
+    // --- 1. Basic Validation ---
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
+    if (!accountNumber || !type || !amount || !description) {
+        return res.status(400).json({ success: false, message: 'Missing required transaction fields.' });
+    }
+    const transactionAmount = parseFloat(amount);
+    if (transactionAmount <= 0 || isNaN(transactionAmount)) {
+        return res.status(400).json({ success: false, message: 'Amount must be a positive number.' });
+    }
+    if (type !== 'credit' && type !== 'debit') {
+        return res.status(400).json({ success: false, message: 'Invalid transaction type. Must be "credit" or "debit".' });
+    }
+
+    // Use a session/transaction for atomicity
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // --- 2. Find and Lock User/Account ---
+        const user = await User.findOne(
+            { _id: userId, 'accounts.accountNumber': accountNumber },
+            null,
+            { session: session }
+        );
+
+        if (!user) {
+            await session.abortTransaction();
+            console.log('❌ Transaction Failed: User or account not found.');
+            return res.status(404).json({ success: false, message: 'User or target account not found.' });
+        }
+
+        const account = user.accounts.find(a => a.accountNumber === accountNumber);
+        let newBalance = account.balance;
+        let finalSignedAmount; // The signed amount saved in the Transaction history
+
+        // --- 3. Perform Transaction Logic ---
+        if (type === 'credit') {
+            newBalance += transactionAmount;
+            finalSignedAmount = transactionAmount; // Positive for credit
+            console.log(`➕ Crediting ${transactionAmount.toFixed(2)} to Account ${accountNumber}.`);
+        } else if (type === 'debit') {
+            if (account.balance < transactionAmount) {
+                await session.abortTransaction();
+                console.log('❌ Transaction Failed: Insufficient funds.');
+                return res.status(400).json({ success: false, message: 'Insufficient funds for this debit operation.' });
+            }
+            newBalance -= transactionAmount;
+            finalSignedAmount = -transactionAmount; // Negative for debit
+            console.log(`➖ Debiting ${transactionAmount.toFixed(2)} from Account ${accountNumber}.`);
+        }
+
+        // --- 4. Update MongoDB Document (Sub-document update) ---
+        const updateResult = await User.updateOne(
+            { _id: userId, 'accounts.accountNumber': accountNumber },
+            { $set: { 'accounts.$.balance': newBalance } }, 
+            { session: session, runValidators: true }
+        );
+
+        if (updateResult.modifiedCount === 0) {
+             // Rollback transaction if any step failed
+            await session.abortTransaction().catch(() => {}); 
+            session.endSession();
+            console.error('Database/Transaction Error: Failed to update balance.');
+            return res.status(500).json({ success: false, message: 'Failed to update balance. Transaction aborted.' });
+        }
+
+
+        // --- 4.5. CREATE TRANSACTION HISTORY RECORD (FIXED DESCRIPTION) ---
+        // This ensures only the user's description is saved, not "Admin CREDIT:"
+        await Transaction.create([{
+            userId: user._id,
+            date: new Date(),
+            amount: finalSignedAmount, // Signed amount for dashboard history
+            description: description, // CORRECT: Uses only the admin's provided description
+            accountNumber: account.accountNumber,
+            accountType: account.accountType,
+            referenceId: `ADMIN-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+            adminProcessedBy: adminId
+        }], { session: session });
+
+        await session.commitTransaction();
+        session.endSession();
+        
+        console.log(`✅ Transaction Success! New Balance: ${newBalance.toFixed(2)} ${user.currency}`);
+
+        // --- 5. Success Response ---
+        res.status(200).json({
+            success: true,
+            message: `${type.toUpperCase()} successful. Transaction recorded.`,
+            newBalance: newBalance,
+            currency: user.currency 
+        });
+
+    } catch (error) {
+        // Rollback transaction if any step failed
+        await session.abortTransaction().catch(() => {}); 
+        session.endSession();
+        console.error('Database/Transaction Error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Server error during fund transfer.' });
+    }
+});
+
+// ------------------------------------
+// --- ADMIN REGISTRATION/LOGIN API ---
+// ------------------------------------
+
+// POST endpoint for new Admin Account creation (Does NOT require token)
+// NOTE: One of the 'api/admins/register' routes was a duplicate. Keeping the first one.
+app.post('/api/admins/register', async (req, res) => {
+    
+    const { fullName, email, password } = req.body;
+
+    console.log(`\n--- Received Data for New Admin (${email}) ---`);
+
+    // --- SERVER-SIDE VALIDATION ---
+    if (!fullName || !email || !password) {
+        return res.status(400).json({ success: false, message: 'Missing required fields (Full Name, Email, Password).' });
+    }
+
+    if (password.length < 6) {
+        return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+    }
+
+    try {
+        // HASH the password before saving
+        const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+        
+        const newAdmin = new Admin({
+            fullName,
+            email,
+            passwordHash,
+        });
+
+        const savedAdmin = await newAdmin.save();
+
+        console.log('\n✅ Admin Account Successfully Created & Stored (MongoDB Save)');
+        console.log('New Admin ID:', savedAdmin._id);
+        console.log('------------------------------------------------------------');
+
+        // Send Success Response
+        res.status(201).json({ 
+            success: true, 
+            message: 'Admin account created successfully. Please log in.',
+            adminId: savedAdmin._id
+        });
+
+    } catch (dbError) {
+        console.error('MongoDB Save Error (Admin Registration):', dbError);
+        // Catch unique email violation (error code 11000)
+        if (dbError.code === 11000) {
+            return res.status(409).json({ 
+                success: false, 
+                message: 'This email is already registered as an Admin.' 
+            });
+        }
+        return res.status(500).json({ 
+            success: false, 
+            message: 'A server error occurred during admin registration.' 
+        });
+    }
+});
+
+// POST endpoint for Admin Login (Does NOT require token, generates one)
+app.post('/api/admins/login', async (req, res) => {
+    const { adminId, password } = req.body; // adminId is the email
+    
+    console.log(`\n--- Attempting Login for Admin: ${adminId} ---`);
+
+    // --- SERVER-SIDE VALIDATION ---
+    if (!adminId || !password) {
+        return res.status(400).json({ success: false, message: 'Missing Admin ID or Password.' });
+    }
+
+    try {
+        // 1. Find the admin by email
+        const admin = await Admin.findOne({ email: adminId.toLowerCase() });
+
+        if (!admin) {
+            console.log('❌ Login Failed: Admin not found.');
+            return res.status(401).json({ success: false, message: 'Invalid Admin ID or Password.' });
+        }
+
+        // 2. Check the password using bcrypt.compare()
+        const isMatch = await bcrypt.compare(password, admin.passwordHash);
+
+        if (isMatch) {
+            // 🚨 Generate a REAL JWT token
+            const token = jwt.sign(
+                { 
+                    id: admin._id, 
+                    email: admin.email,
+                    role: admin.role
+                }, 
+                JWT_SECRET, 
+                { expiresIn: '24h' } // Token expires in 24 hour
+            );
+        
+            // 3. Successful Login: Send the real token
+            console.log(`✅ Admin Login Successful for ${admin.fullName}. JWT generated.`);
+            res.status(200).json({ 
+                success: true, 
+                message: 'Login successful. Proceed to dashboard.',
+                token: token, // Real JWT 
+                adminName: admin.fullName
+            });
+        } else {
+            console.log('❌ Login Failed: Incorrect password.');
+            res.status(401).json({ success: false, message: 'Invalid Admin ID or Password.' });
+        }
+
+    } catch (error) {
+        console.error('Error during Admin Login/Password Compare:', error);
+        res.status(500).json({ success: false, message: 'A server error occurred during login.' });
+    }
+});
+// Add this block near your other API routes in server.js
+// ----------------------------------------------------
+// --- API for ACCOUNT STATUS UPDATE (PROTECTED) ---
+// ----------------------------------------------------
+// 🚨 NEW PROTECTED ROUTE for manage-user-status.html
+app.post('/api/accounts/status', verifyAdminToken, async (req, res) => {
+    // Expected body: { userId, newStatus, adminName, reason }
+    const { userId, newStatus, adminName, reason } = req.body;
+
+    console.log(`\n--- Received Status Update Request from Admin ${adminName} ---`);
+    console.log(`Details: User ${userId}, New Status: ${newStatus}, Reason: ${reason}`);
+
+    // --- 1. Basic Validation ---
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
+    if (!newStatus || !reason || !adminName) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: newStatus, adminName, or reason.' });
+    }
+    if (reason.length < 10) {
+        return res.status(400).json({ success: false, message: 'Justification reason must be at least 10 characters long.' });
+    }
+
+    // Normalize incoming status (e.g., 'active' -> 'Active') for consistent database storage
+    const normalizedStatus = newStatus.charAt(0).toUpperCase() + newStatus.slice(1).toLowerCase();
+
+    // The status values match the enum in the User Schema
+    const allowedStatuses = ['Active', 'Suspended', 'Restricted', 'Locked', 'Blocked', 'Closed', 'Reactivated'];
+
+    if (!allowedStatuses.includes(normalizedStatus)) {
+        return res.status(400).json({ success: false, message: `Invalid status value: ${newStatus}.` });
+    }
+
+    try {
+        // --- 2. Perform Update ---
+        const updateResult = await User.findByIdAndUpdate(
+            userId, 
+            { $set: { status: normalizedStatus } }, 
+            { new: true, runValidators: true } // 'new: true' returns the updated document
+        ).select('status fullName');
+
+        if (!updateResult) {
+            console.log(`❌ Status Update Failed: User ID ${userId} not found.`);
+            return res.status(404).json({ success: false, message: 'User not found for status update.' });
+        }
+        
+        console.log(`✅ Status Update Success! User ${updateResult.fullName} is now ${updateResult.status}.`);
+
+        // --- 3. Success Response ---
+        res.status(200).json({
+            success: true,
+            message: `User status successfully changed to ${updateResult.status}.`,
+            newStatus: updateResult.status 
+        });
+
+    } catch (error) {
+        console.error('Database/Update Error (Status Change):', error);
+        res.status(500).json({ success: false, message: 'Server error during account status update.' });
+    }
+});
+
+/**
+ * POST /api/cards/generate
+ * Finalizes and saves the new bank card details to the MongoDB Card collection.
+ * Requires admin authorization.
+ * 🚨 FIX: Replaced 'adminAuthMiddleware' with the correct function name 'verifyAdminToken'
+ */
+app.post('/api/cards/generate', verifyAdminToken, async (req, res) => {
+    const cardData = req.body;
+    console.log('Received card generation request. Data:', cardData);
+
+    const { userId, cardHolderName, cardNumber, expiryDate, cvv } = cardData;
+
+    // 1. Basic Validation
+    if (!userId || !cardHolderName || !cardNumber || !expiryDate || !cvv) {
+        return res.status(400).json({ message: 'Missing required card data (userId, cardHolderName, cardNumber, expiryDate, or cvv).' });
+    }
+
+    try {
+        // 2. Validate User Existence (ensure the card is linked to a real user)
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+             return res.status(400).json({ message: 'Invalid User ID format in payload.' });
+        }
+        const userExists = await User.exists({ _id: userId });
+        if (!userExists) {
+            return res.status(404).json({ message: `User ID ${userId} does not exist.` });
+        }
+        
+        // 3. Create the Card Document using the Mongoose Model
+        const newCard = new Card({
+            userId: userId,
+            cardHolderName: cardHolderName,
+            cardNumber: cardNumber, // Stored without spaces (frontend removes them)
+            expiryDate: expiryDate,
+            cvv: cvv,
+            generatedByAdmin: req.admin.id, // Get admin ID from JWT payload (now using req.admin.id from verifyAdminToken)
+            status: 'Active'
+        });
+
+        // 4. Save to MongoDB
+        await newCard.save();
+        
+        console.log(`Card successfully saved to MongoDB. ID: ${newCard._id}`);
+        
+        // 5. Success Response
+        res.status(201).json({ 
+            message: 'Card finalized and saved successfully.',
+            cardDetails: { id: newCard._id, userId: newCard.userId, cardNumber: newCard.cardNumber }
+        });
+
+    } catch (error) {
+        console.error('Error finalizing card:', error);
+        
+        // Handle unique constraint error (e.g., if card number already exists)
+        if (error.code === 11000) {
+            return res.status(409).json({ message: 'Card number already exists in the database. Please generate a new one.' });
+        }
+        // Handle validation errors (e.g., if data types are wrong)
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ message: `Validation Error: ${error.message}` });
+        }
+        
+        res.status(500).json({ message: 'Internal Server Error while saving the card.' });
+    }
+});
+
+
+/**
+ * POST /api/users/:id/transactions/generate
+ * Generates a specified number of mock transactions for a user.
+ * Requires admin authorization.
+ * * NOTE: Assumes 'User', 'Transaction', 'mongoose', 'getRandomAmount', 
+ * 'getRandomDescription', 'getRandomDate', and 'verifyAdminToken' are defined/imported 
+ * in the surrounding server file.
+ */
+app.post('/api/users/:id/transactions/generate', verifyAdminToken, async (req, res) => {
+    
+    const targetUserId = req.params.id;
+    
+    // PULLING parameters from the request body
+    const { 
+        numTransactions = 10, 
+        minAmount = 5.00, 
+        maxAmount = 500.00, 
+        startDaysAgo = 90, 
+        endDaysAgo = 0,
+        descriptionPattern = "Mock Transaction at Merchant X",
+        transactionType = "MIXED" // Added for optional bias (not used below, but good practice)
+    } = req.body;
+
+    // --- 1. Validation and Setup ---
+    if (numTransactions < 1 || numTransactions > 500) {
+        return res.status(400).json({ message: 'Invalid number of transactions (must be between 1 and 500).' });
+    }
+    
+    // Define date range
+    const now = new Date();
+    const startDate = new Date(now.getTime() - startDaysAgo * 24 * 60 * 60 * 1000);
+    const endDate = new Date(now.getTime() - endDaysAgo * 24 * 60 * 60 * 1000);
+
+    // --- 2. Database Check: Find User and Accounts (Using Nested Schema) ---
+    let user, targetAccount; 
+    try {
+        if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+            return res.status(400).json({ message: 'Invalid user ID format.' });
+        }
+        
+        user = await User.findById(targetUserId);
+        if (!user) {
+            return res.status(404).json({ message: `User with ID ${targetUserId} not found.` });
+        }
+
+        // Find the user's primary account (Checking, or the first one available)
+        if (user.accounts.length === 0) {
+            // Logic to create a default account
+            const newAccount = {
+                currencyCode: user.currency || 'USD',
+                accountNumber: `MOCK-${Math.floor(Math.random() * 10000000000)}`,
+                domesticRouting: '000000000',
+                balance: 1000.00,
+                accountType: 'Checking'
+            };
+            user.accounts.push(newAccount);
+            await user.save(); 
+            
+            targetAccount = user.accounts[0];
+            console.log(`Created default account ${targetAccount.accountNumber} for user ${targetUserId}.`);
+        } else {
+             targetAccount = user.accounts.find(acc => acc.accountType === 'Checking') || user.accounts[0];
+        }
+        
+        if (!targetAccount) {
+             return res.status(404).json({ message: `User has no valid accounts to attach transactions to.` });
+        }
+        
+    } catch (e) {
+        console.error("Error during user/account lookup for generation:", e);
+        return res.status(500).json({ message: 'Server error during database preparation.' });
+    }
+    
+    // --- 3. Generate and Save Transactions ---
+    const transactionsToSave = [];
+
+    for (let i = 0; i < numTransactions; i++) {
+        const rawAmount = parseFloat(getRandomAmount(minAmount, maxAmount));
+        const isCredit = Math.random() < 0.5; // 50/50 chance for Credit/Debit
+        // Amount is positive (+) for Credit, negative (-) for Debit
+        const finalAmount = isCredit ? rawAmount : -rawAmount; 
+        
+        const newTransaction = {
+            userId: targetUserId,
+            accountNumber: targetAccount.accountNumber,
+            accountType: targetAccount.accountType,
+            referenceId: `${targetUserId.substring(0, 8)}-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`, 
+            amount: finalAmount, 
+            description: getRandomDescription(isCredit, descriptionPattern), 
+            date: getRandomDate(startDate, endDate) 
+        };
+        
+        transactionsToSave.push(newTransaction);
+    }
+
+    // --- 4. Atomic Database Operation (Transaction and Balance Update) ---
+    try {
+        // 1. Save the new transactions
+        const insertedTransactions = await Transaction.insertMany(transactionsToSave);
+        
+        // 2. Calculate the net change
+        const netChange = insertedTransactions.reduce((sum, t) => sum + t.amount, 0);
+        
+        // 3. Find the index of the modified account
+        const accountIndex = user.accounts.findIndex(acc => acc.accountNumber === targetAccount.accountNumber);
+
+        if (accountIndex !== -1) {
+            // 4. Update the balance directly on the user's accounts array
+            user.accounts[accountIndex].balance += netChange;
+            
+            // 5. CRITICAL FIX: Tell Mongoose the nested array element has been modified
+            user.markModified('accounts');
+            
+            // 6. Save the user document (which now includes the updated balance)
+            await user.save();
+            
+            // Update the local targetAccount for the response
+            targetAccount = user.accounts[accountIndex];
+        } else {
+            console.error("CRITICAL ERROR: Account not found in user's array for balance update.");
+            // We successfully saved transactions, but the balance is NOT updated. Log and warn.
+        }
+        
+        console.log(`✅ Successfully generated and inserted ${insertedTransactions.length} transactions for user ${targetUserId}. Net change: ${netChange.toFixed(2)}`);
+
+        res.status(201).json({ 
+            message: `Successfully generated ${insertedTransactions.length} transactions.`, 
+            userId: targetUserId,
+            count: insertedTransactions.length,
+            newBalance: targetAccount.balance.toFixed(2) // Return the new balance
+        });
+    } catch (e) {
+        // This catch block handles errors from Transaction.insertMany() OR user.save()
+        console.error("❌ Error during database write (transactions or user save):", e);
+        
+        if (e.name === 'ValidationError') {
+            return res.status(400).json({ 
+                message: 'Transaction failed Mongoose validation (Missing field, etc.).',
+                error: e.message 
+            });
+        }
+        
+        if (e.code === 11000) {
+            return res.status(500).json({ 
+                 message: 'Failed to save transactions due to a duplicate reference ID. Try again.',
+                 error: e.message 
+            });
+        }
+        
+        // Fallback 500
+        res.status(500).json({ 
+            message: 'An unexpected server error occurred during transaction saving or balance update.',
+            error: e.message 
+        });
+    }
+});
+
+// POST endpoint for User/Client Login (MODIFIED FOR EMAIL LOGIN AND 2FA INITIATION)
+app.post('/api/users/login', async (req, res) => {
+    // We now accept an identifier that can be either userIdName or the user's email
+    const { loginIdentifier, userPassword } = req.body; 
+    
+    console.log(`\n--- Attempting Login for Identifier: ${loginIdentifier} (2FA Initiation) ---`);
+
+    // --- SERVER-SIDE VALIDATION ---
+    if (!loginIdentifier || !userPassword) {
+        return res.status(400).json({ success: false, message: 'Missing Identifier or Password.' });
+    }
+
+    try {
+        // 1. Find the user by userIdName OR email (case-insensitive search for both)
+        const user = await User.findOne({ 
+            $or: [
+                { userIdName: loginIdentifier.toLowerCase() },
+                { email: loginIdentifier.toLowerCase() }
+            ]
+        });
+
+        if (!user) {
+            console.log('❌ Login Failed: User not found or identifier invalid.');
+            return res.status(401).json({ success: false, message: 'Invalid User ID/Email or Password.' });
+        }
+        
+        // Check account status
+        if (user.status !== 'Active') {
+            console.log(`❌ Login Failed: User account status is ${user.status}.`);
+            return res.status(403).json({ success: false, message: `Account is ${user.status}. Please contact support.` });
+        }
+
+        // 2. Check the password using bcrypt.compare()
+        const isMatch = await bcrypt.compare(userPassword, user.passwordHash);
+
+        if (isMatch) {
+            // 🚨 2FA LOGIC: Password is correct. Trigger REAL OTP workflow.
+            
+            if (!user.email) {
+                console.log(`❌ OTP Failed: User ${user.userIdName} has no registered email for 2FA.`);
+                return res.status(500).json({ success: false, message: '2FA setup incomplete. Please contact support.' });
+            }
+            
+            // --- REAL OTP GENERATION AND EMAIL SENDING ---
+            await generateAndSendOtp(user); // Now uses the new, correctly defined helper
+            // ---------------------------------------------
+            
+            const maskedAddress = maskEmail(user.email);
+            console.log(`✅ User Password Match for ${user.fullName}. OTP SENT to ${maskedAddress}. Proceeding to OTP verification step.`);
+            
+            // Respond with 202 (Accepted) to tell the client to proceed to the verification form.
+            return res.status(202).json({ 
+                success: true, 
+                message: 'Password verified. Proceeding to security check.',
+                nextStep: 'VERIFY_OTP', 
+                // Send back the identifier used for the first step to be used in the second step
+                loginIdentifier: loginIdentifier,
+                maskedEmail: maskedAddress 
+            });
+            
+        } else {
+            console.log('❌ Login Failed: Incorrect password.');
+            res.status(401).json({ success: false, message: 'Invalid User ID/Email or Password.' });
+        }
+
+    } catch (error) {
+        // This catch handles DB lookups, bcrypt errors, AND errors thrown by generateAndSendOtp (e.g., email failure)
+        console.error('Error during User Login/2FA Initiation:', error);
+        // The error message from the email function is propagated here
+        const errorMessage = error.message.includes('verification code') ? error.message : 'A server error occurred during login.';
+        res.status(500).json({ success: false, message: errorMessage });
+    }
+});
+
+// ------------------------------------------------------------------------------------------------
+// --- NEW POST endpoint for OTP Verification (2FA completion) ---
+// ------------------------------------------------------------------------------------------------
+app.post('/api/users/verify-otp', async (req, res) => {
+    // Requires the identifier (userIdName/email) and the OTP code entered by the user
+    const { loginIdentifier, otpCode } = req.body; 
+
+    console.log(`\n--- Received OTP Verification Request for Identifier: ${loginIdentifier} ---`);
+
+    if (!loginIdentifier || !otpCode) {
+        return res.status(400).json({ success: false, message: 'Missing identifier or OTP code.' });
+    }
+
+    try {
+        // 1. Find the user using the identifier provided during the login process
+        const user = await User.findOne({ 
+            $or: [
+                { userIdName: loginIdentifier.toLowerCase() },
+                { email: loginIdentifier.toLowerCase() }
+            ]
+        });
+
+        if (!user) {
+            console.log('❌ Verification Failed: User not found for identifier.');
+            return res.status(401).json({ success: false, message: 'Unauthorized access attempt.' });
+        }
+        
+        // 2. Check if an OTP is currently set for this user (CORRECTED FIELD NAMES)
+        if (!user.otpHash || !user.otpExpiration) {
+            console.log(`❌ Verification Failed: No pending OTP for user ${user.userIdName}.`);
+            // Avoid leaking information about whether an OTP was requested
+            return res.status(401).json({ success: false, message: 'Invalid OTP or session expired.' }); 
+        }
+
+        // 3. Check if the OTP has expired (CORRECTED FIELD NAMES)
+        if (new Date() > user.otpExpiration) {
+            // Clear the expired OTP data to prevent reuse (CORRECTED FIELD NAMES)
+            user.otpHash = null;
+            user.otpExpiration = null;
+            await user.save();
+            
+            console.log(`❌ Verification Failed: OTP expired for user ${user.userIdName}.`);
+            return res.status(401).json({ success: false, message: 'OTP expired. Please try logging in again.' });
+        }
+
+        // 4. Compare the user's plain text OTP against the HASHED secret (CORRECTED FIELD NAME)
+        const otpMatch = await bcrypt.compare(otpCode, user.otpHash);
+
+        if (otpMatch) {
+            // ✅ SUCCESS: OTP MATCHED
+            console.log(`✅ Verification Success for user ${user.userIdName}. Generating token.`);
+
+            // a. Clear the OTP details immediately (important security step) (CORRECTED FIELD NAMES)
+            user.otpHash = null;
+            user.otpExpiration = null;
+
+            // b. Generate a JWT token for the session
+            const token = generateClientToken(user);
+
+            // c. Save the cleared OTP state
+            await user.save(); 
+
+            // d. Respond with the success token and necessary client data
+            return res.status(200).json({ 
+                success: true, 
+                message: 'Login successful. OTP verified.',
+                token: token, 
+                userIdName: user.userIdName,
+                fullName: user.fullName
+            });
+
+        } else {
+            // ❌ FAILURE: OTP DID NOT MATCH
+            console.log(`❌ Verification Failed: Invalid OTP for user ${user.userIdName}.`);
+            // We do NOT clear the OTP here, allowing the user a few more tries until expiry.
+            return res.status(401).json({ success: false, message: 'Invalid OTP. Please check the code sent to your email.' });
+        }
+
+    } catch (error) {
+        console.error('Error during OTP Verification:', error);
+        res.status(500).json({ success: false, message: 'A server error occurred during verification.' });
+    }
+});
+
+// --- NEW POST endpoint for OTP Resend (Resends the existing code or generates a new one) ---
+app.post('/api/users/resend-otp', async (req, res) => {
+    const { loginIdentifier } = req.body; 
+
+    if (!loginIdentifier) {
+        return res.status(400).json({ success: false, message: 'Missing identifier.' });
+    }
+
+    try {
+        const user = await User.findOne({ 
+            $or: [
+                { userIdName: loginIdentifier.toLowerCase() },
+                { email: loginIdentifier.toLowerCase() }
+            ]
+        });
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        
+        // Check if an OTP is already active, if so, just resend it (or regenerate/resend for security)
+        // Here, we'll follow the logic of re-generating and re-sending an OTP.
+        await generateAndSendOtp(user); 
+        
+        const maskedAddress = maskEmail(user.email);
+        console.log(`✅ OTP Re-sent to ${maskedAddress}.`);
+        
+        return res.status(200).json({ 
+            success: true, 
+            message: `A new verification code has been sent to ${maskedAddress}.`
+        });
+
+    } catch (error) {
+        console.error('Error during OTP Resend:', error);
+        res.status(500).json({ success: false, message: 'Failed to re-send OTP.' });
+    }
+});
+
+// ------------------------------------------------------------------------------------------------
+// --- CLIENT DASHBOARD API (FINAL FIX: CHANGING LOOKUP METHOD) ---
+// ------------------------------------------------------------------------------------------------
+app.get('/api/client/dashboard', verifyClientToken, async (req, res) => {
+    
+    // 1. FIX: Get the User ID (which is the username string) from the token payload.
+    // The previous debug showed req.user.userIdName is the only reliable value.
+    const username = req.user.userIdName; 
+
+    if (!username) {
+        console.error('CRITICAL ERROR: Username (userIdName) not found in token payload.');
+        return res.status(401).json({ success: false, message: 'Authorization error: Missing user identifier in token.' });
+    }
+    
+    console.log(`\n--- Received Dashboard Request for Username: ${username} ---`);
+
+    try {
+        // 2. FIX: Use User.findOne to query the specific username field, 
+        // which prevents Mongoose from trying to cast "lucas44" to an ObjectId.
+        const user = await User.findOne({ userIdName: username }).select('fullName profilePicturePath accounts currency email'); 
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found in database using username.' });
+        }
+        
+        // 3. Fetch Recent Transactions
+        // This is now safe, as user._id will be the correct MongoDB ObjectId from the found user object.
+        const recentTransactions = await Transaction.find({ userId: user._id })
+            .sort({ date: -1 })
+            .limit(10)
+            .select('description date amount accountType'); 
+        
+        console.log(`Fetched ${recentTransactions.length} recent transactions for the dashboard.`);
+
+        // 4. Consolidate and Send Response (Remains the same)
+        const dashboardData = {
+            fullName: user.fullName,
+            greetingName: user.fullName.split(' ')[0],
+            email: user.email,
+            profilePicturePath: user.profilePicturePath,
+            accounts: user.accounts,
+            currency: user.currency,
+            transactions: recentTransactions, 
+        };
+
+        console.log(`✅ Dashboard data fetched for ${user.fullName}.`);
+        res.status(200).json({ success: true, data: dashboardData });
+
+    } catch (error) {
+        // ... (error handling) ...
+        console.error('CRITICAL SERVER ERROR during dashboard retrieval:', error); 
+        res.status(500).json({ success: false, message: 'Server error while retrieving dashboard data.' });
+    }
+});
+
+// -----------------------------------------------------------
+// --- HELPER FUNCTION FOR CLIENT PROFILE RETRIEVAL (NEW) ---
+// -----------------------------------------------------------
+
+/**
+ * Fetches user data from MongoDB using the ID from the token 
+ * and transforms it for the client profile page response.
+ * @param {string} userId - The MongoDB ObjectId of the user.
+ * @returns {object | null} - Transformed profile data or null.
+ */
+async function fetchClientProfileFromDB(userId) {
+    // Select all fields *except* sensitive hashes for client-side display
+    // NOTE: 'User' must be imported/defined (e.g., from mongoose model) in the environment where this runs.
+    const userDoc = await User.findById(userId).select('-passwordHash -transferPinHash -__v').lean(); 
+    
+    if (!userDoc) {
+        return null;
+    }
+
+    // Assumes the DB 'address' field is a delimited string (Line1|Line2|City|State|Zip) and splits it for the client.
+    // Ensure we handle cases where userDoc.address might be null or undefined
+    const addressParts = userDoc.address ? userDoc.address.split('|') : [];
+    const [addressLine1, addressLine2, city, state, zipCode] = addressParts;
+
+
+    return {
+        // Core Profile Information
+        id: userDoc._id,
+        userIdName: userDoc.userIdName,
+        fullName: userDoc.fullName,
+        greetingName: userDoc.fullName.split(' ')[0], // First name for greeting
+        email: userDoc.email, // CORRECTED: Use the actual email from the database
+        profilePicturePath: userDoc.profilePicturePath,
+
+        // Contact/Address Information (Split from single DB field)
+        addressLine1: addressLine1 || '',
+        addressLine2: addressLine2 || '',
+        city: city || '',
+        state: state || '',
+        zipCode: zipCode || '',
+        occupation: userDoc.occupation,
+        gender: userDoc.gender,
+        dob: userDoc.dob ? userDoc.dob.toISOString().split('T')[0] : '', // Format date for client input
+
+        // Financial/Status
+        currency: userDoc.currency,
+        status: userDoc.status,
+        accounts: userDoc.accounts, // Send the full accounts array
+    };
+}
+
+
+app.get('/api/client/messages', verifyClientToken, async (req, res) => {
+    
+    // The user's ID is retrieved from the authenticated token payload (req.user.id, which is set by verifyClientToken)
+    // Note: This API endpoint is now redundant if the client uses the dashboard endpoint to fetch messages, 
+    // but it serves as a dedicated, minimalist message endpoint if required.
+    const userId = req.user.id; 
+    console.log(`\n--- Received GET Request for Client Messages for User ID: ${userId} ---`);
+
+    try {
+        // 1. Find the user and SELECT ONLY the message field (announcementMessage)
+        // 🚨 FIX: Removed 'issueMessage' from the selection
+        const user = await User.findById(userId).select('announcementMessage');
+
+        if (!user) {
+            console.log(`❌ User ID ${userId} not found.`);
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        // 2. Return the clean message object
+        // 🚨 FIX: Removed 'issueMessage' from the response
+        const responseData = {
+            success: true,
+            announcementMessage: user.announcementMessage,
+        };
+
+        console.log(`✅ Client messages fetched successfully for ${userId}.`);
+        res.status(200).json(responseData);
+
+    } catch (error) {
+        console.error(`Error fetching client messages for user ${userId}:`, error);
+        res.status(500).json({ success: false, message: 'Server error while retrieving client messages.' });
+    }
+});
+
+// -------------------------------------------------------------------------
+// --- API for GET CLIENT PROFILE (Fixes the original 404 error) ---
+// -------------------------------------------------------------------------
+// 🚨 PROTECTED ROUTE
+app.get('/api/client/profile', verifyClientToken, async (req, res) => {
+    // req.user contains the decoded JWT payload (id, userIdName, role)
+    const userId = req.user.id;
+    console.log(`\n--- Received GET Request for Client Profile (ID: ${userId}) ---`);
+
+    try {
+        const profileData = await fetchClientProfileFromDB(userId);
+        
+        if (!profileData) {
+            console.log(`❌ Profile for client ID ${userId} not found.`);
+            return res.status(404).json({ success: false, message: 'User profile not found in database.' });
+        }
+
+        // Success Response (Status 200 OK)
+        // The client expects the data nested under a 'data' key: const { data } = await response.json();
+        console.log(`✅ Profile data successfully fetched for ${profileData.userIdName}.`);
+        res.json({
+            success: true,
+            data: profileData
+        });
+
+    } catch (error) {
+        console.error('Error fetching client profile:', error.message);
+        res.status(500).json({ success: false, message: 'Internal Server Error during profile retrieval.' });
+    }
+});
+
+/**
+ * Generates a string of random digits of a specified length.
+ * @param {number} length The number of digits to generate.
+ * @returns {string} The random number string.
+ */
+const generateRandomNumber = (length) => {
+    // Math.random() generates a float between 0 (inclusive) and 1 (exclusive)
+    // We multiply it by 10^length, convert to integer, and pad the result with leading zeros
+    // to ensure the specified length is met (e.g., 6 digits).
+    
+    // Example for length 6: 
+    // Math.random() * 1000000 -> e.g., 54321.987
+    // Math.floor(...) -> 54321
+    // .toString() -> "54321"
+    // .padStart(6, '0') -> "054321"
+    
+    return Math.floor(Math.random() * Math.pow(10, length))
+               .toString()
+               .padStart(length, '0');
+};
+// ------------------------------------------------------------------------------------------------
+// --- API for CLIENT FUND TRANSFER (INTERNAL/EXTERNAL) ---
+// ------------------------------------------------------------------------------------------------
+// 🚨 NEW PROTECTED ROUTE for client-side transfers
+app.post('/api/client/transfer', verifyClientToken, async (req, res) => {
+    // 1. Get client's ID from the token
+    const userId = req.user.id; 
+    
+    // Expected body: { sourceAccountNumber, amount, transferType, destinationName, destinationAccountNumber, destinationBank, transferPin, bankIdentifier, recipientAddress }
+    const { 
+        sourceAccountNumber, 
+        amount, 
+        transferType, 
+        destinationName, 
+        destinationAccountNumber, 
+        destinationBank,
+        transferPin // The user's secret PIN for confirming transactions
+    } = req.body;
+    
+    const transactionAmount = parseFloat(amount);
+    
+    console.log(`\n--- Received Client Transfer Request from User ID: ${userId} ---`);
+
+    // --- 2. Basic Validation ---
+    if (!sourceAccountNumber || !transactionAmount || !transferType || !transferPin) {
+        return res.status(400).json({ success: false, message: 'Missing required transfer fields (Source, Amount, Type, or PIN).' });
+    }
+    
+    if (transactionAmount <= 0 || isNaN(transactionAmount)) {
+        return res.status(400).json({ success: false, message: 'Amount must be a positive number.' });
+    }
+    
+    if (!/^\d{4}$/.test(transferPin)) {
+        return res.status(400).json({ success: false, message: 'Transfer PIN must be 4 digits.' });
+    }
+
+    // --- Mongoose Session Setup (CRITICAL for atomicity) ---
+    let session;
+    let referenceId; // Declare outside try scope to use later
+    let userCurrency; // Declare outside try scope
+
+    try {
+        // Start a Mongoose session for transaction atomicity (all or nothing)
+        session = await mongoose.startSession();
+        session.startTransaction();
+
+        // --- 3. Find User and Validate PIN ---
+        // 🔑 IMPORTANT: Include 'email' field here for notification!
+        const user = await User.findById(userId)
+            .session(session)
+            .select('transferPinHash accounts currency transferMessage email') 
+            .lean(); 
+
+        if (!user) {
+            await session.abortTransaction();
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        
+        // Validate Transfer PIN using bcrypt
+        const isPinMatch = await bcrypt.compare(transferPin, user.transferPinHash);
+        
+        if (!isPinMatch) {
+            await session.abortTransaction();
+            console.log('❌ Transfer Failed: Invalid Transfer PIN.');
+            return res.status(403).json({ success: false, message: 'Invalid Transfer PIN. Transaction aborted.' });
+        }
+        
+        // --- 3.5. CHECK FOR CONDITIONAL TRANSFER MESSAGE BLOCK (POLICY) ---
+        const messageConfig = user.transferMessage || {};
+        if (messageConfig.isActive === true) {
+            await session.abortTransaction();
+            console.log(`⚠️ Transfer Blocked: Conditional message is active for user ${userId}. Message: "${messageConfig.messageContent.substring(0, 30)}..."`);
+            return res.status(409).json({ 
+                success: false, 
+                message: 'Transaction blocked by administrator policy.',
+                conditionalMessage: messageConfig.messageContent,
+                policyType: 'ADMIN_POLICY' // <-- UNIQUE IDENTIFIER for front end
+            });
+        }
+
+        // --- 4. Locate and Verify Source Account and Balance ---
+        const sourceAccount = user.accounts.find(a => a.accountNumber === sourceAccountNumber);
+
+        if (!sourceAccount) {
+            await session.abortTransaction();
+            return res.status(404).json({ success: false, message: 'Source account not found for this user.' });
+        }
+        
+        // --- 4.1. Calculate Potential New Balance and Overdraft Limit ---
+        const newBalance = sourceAccount.balance - transactionAmount;
+        userCurrency = user.currency; // Store currency for notification/response
+
+        // NOTE: Assuming the account structure includes an 'overdraftLimit' field (e.g., 5000)
+        // Set a default limit for demonstration if it doesn't exist in the data model.
+        const overdraftLimit = sourceAccount.overdraftLimit || 0.00; // 0.00 means no overdraft is allowed
+        const allowedMinimumBalance = -Math.abs(overdraftLimit); // Convert limit (e.g., 5000) to allowed minimum (-5000)
+        
+        // Check if the transaction would breach the allowed negative limit (overdraftLimit)
+        if (newBalance < allowedMinimumBalance) {
+            await session.abortTransaction();
+            console.log('❌ Transfer Failed: Overdraft limit exceeded.');
+            
+            const currentBalanceMessage = sourceAccount.balance >= 0 
+                ? `You are trying to transfer ${transactionAmount.toFixed(2)}, but your maximum allowed overdraft limit is ${userCurrency} ${overdraftLimit.toFixed(2)}.`
+                : `Your current balance is ${sourceAccount.balance.toFixed(2)}. The transaction of ${transactionAmount.toFixed(2)} would exceed your allowed overdraft limit of ${userCurrency} ${overdraftLimit.toFixed(2)}.`;
+
+            return res.status(409).json({ 
+                success: false, 
+                message: 'Transaction aborted due to insufficient funds or overdraft limit breach.',
+                conditionalMessage: currentBalanceMessage,
+                policyType: 'OVERDRAFT_BREACH' // <-- ANOTHER TYPE OF 409 BLOCK
+            });
+        }
+
+        // --- 5. Perform the Debit Operation (Update Balance) ---
+        // New balance calculation already done in 4.1.
+        
+        // Use Mongoose update to debit the account
+        const updateResult = await User.updateOne(
+            { _id: userId, 'accounts.accountNumber': sourceAccountNumber },
+            { $set: { 'accounts.$.balance': newBalance } }, 
+            { session: session, runValidators: true }
+        );
+        
+        if (updateResult.modifiedCount === 0) {
+            await session.abortTransaction();
+            throw new Error('Failed to update source account balance. Check account number and user ID.');
+        }
+
+        // --- 6. Create Transaction History Record (Debit) ---
+        const transactionDescription = `Transfer: ${transferType} to ${destinationName || 'External Account'} (${destinationAccountNumber ? destinationAccountNumber.slice(-4) : 'N/A'})`;
+        referenceId = `TXN-${Date.now()}-${generateRandomNumber(6)}`; // Store referenceId globally for the scope
+
+        await Transaction.create([{ 
+            userId: user._id, 
+            date: new Date(), 
+            amount: -transactionAmount, 
+            description: transactionDescription, 
+            accountNumber: sourceAccount.accountNumber, 
+            accountType: sourceAccount.accountType, 
+            referenceId: referenceId,
+            status: 'Approved'
+        }], { session: session });
+
+        // --- 7. Commit Transaction (CRITICAL) ---
+        await session.commitTransaction();
+        session.endSession();
+        
+        // --- 8. POST-COMMIT ACTION: Send Email Notification ---
+        const transactionDetails = {
+            formattedAmount: formatCurrency(transactionAmount, userCurrency),
+            sourceAccountNumber: sourceAccount.accountNumber,
+            destinationName: destinationName || 'Internal Account Transfer',
+            destinationAccountNumber: destinationAccountNumber || sourceAccount.accountNumber,
+            transferType: transferType,
+            referenceId: referenceId,
+            newBalance: formatCurrency(newBalance, userCurrency),
+        };
+        
+        sendTransferNotification(user.email, transactionDetails); 
+        
+        console.log(`✅ Client Transfer Success! New Balance for ${sourceAccountNumber}: ${newBalance.toFixed(2)} ${userCurrency}`);
+
+        // --- 9. Success Response ---
+        res.status(200).json({
+            success: true,
+            message: `Transfer of ${userCurrency} ${transactionAmount.toFixed(2)} completed successfully. A confirmation email has been sent. Reference ID: ${referenceId}`,
+            newBalance: newBalance,
+            currency: userCurrency 
+        });
+
+    } catch (error) {
+        if (session) {
+            await session.abortTransaction().catch(() => {}); 
+            session.endSession();
+        }
+        console.error('Database/Client Transfer Error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Server error during client fund transfer.' });
+    }
+});
+
+
+// --- 2. CLIENT CARD MANAGEMENT API (FETCH CARD DATA) ---
+// 🚨 MODIFIED: EXPOSES FULL CARD NUMBER AND CVV AS REQUESTED.
+app.get('/api/client/card', verifyClientToken, async (req, res) => {
+    const userId = req.user.id;
+    console.log(`\n--- Received Card Data Request for Client ID: ${userId} ---`);
+
+    try {
+        // Fetch User Data (For fullName)
+        const user = await User.findById(userId).select('fullName');
+        
+        // Find the user's primary card. 
+        // Ensure cardNumber and cvv are selected from the database
+        const card = await Card.findOne({ userId: userId }).select('cardHolderName cardNumber expiryDate status cvv');
+
+        if (!user || !card) {
+            console.error('Failure: Card or User not found.');
+            // This is a common error if the token has an ID that doesn't map to a user/card
+            return res.status(404).json({ success: false, message: 'Card or User not found.' });
+        }
+
+        // 2. Prepare Data for Client
+        // ⚠️ WARNING: EXPOSING FULL CARD NUMBER AND CVV AS REQUESTED. 
+        // Revert to masking (e.g., card.cardNumber.slice(-4)) in production.
+        const cardData = {
+            fullName: user.fullName,
+            cardHolderName: card.cardHolderName,
+            
+            // FULL CARD NUMBER EXPOSED
+            displayCardNumber: card.cardNumber, 
+            
+            // CVV EXPOSED
+            cvv: card.cvv, 
+
+            isFrozen: card.status === 'Suspended',
+            expiryDate: card.expiryDate, // MM/YY
+        };
+
+        console.log(`✅ Card data fetched for ${card.cardHolderName}. Full details exposed for debugging/testing.`);
+        res.status(200).json({ success: true, data: cardData });
+
+    } catch (error) {
+        console.error('Error fetching client card data:', error);
+        // CastError often indicates an invalid ObjectId was passed as userId
+        if (error.name === 'CastError') {
+             return res.status(400).json({ success: false, message: 'Invalid User ID format.' });
+        }
+        res.status(500).json({ success: false, message: 'Server error while retrieving card data.' });
+    }
+});
+
+// --- CLIENT CARD MANAGEMENT API (TOGGLE FREEZE STATUS) ---
+// 🚨 PROTECTED ROUTE
+app.post('/api/client/card/freeze', verifyClientToken, async (req, res) => {
+    const userId = req.user.id;
+    const { shouldFreeze } = req.body; // boolean: true to Suspend, false to Activate
+    console.log(`\n--- Received Freeze Toggle Request for Client ID: ${userId} to ${shouldFreeze ? 'FREEZE' : 'UNFREEZE'} ---`);
+
+    try {
+        const newStatus = shouldFreeze ? 'Suspended' : 'Active';
+
+        // Find and update the card status
+        const card = await Card.findOneAndUpdate(
+            { userId: userId },
+            { status: newStatus },
+            { new: true } // Return the updated document
+        );
+
+        if (!card) {
+            return res.status(404).json({ success: false, message: 'Card not found.' });
+        }
+
+        console.log(`✅ Card status updated to: ${card.status}`);
+        res.status(200).json({ 
+            success: true, 
+            message: `Card has been ${newStatus.toLowerCase()}.`,
+            data: { isFrozen: card.status === 'Suspended' } 
+        });
+
+    } catch (error) {
+        console.error('Error toggling card status:', error);
+        res.status(500).json({ success: false, message: 'Server error while updating card status.' });
+    }
+});
+
+// ------------------------------------------------------------------------------------------------
+// --- API for GET TRANSFER TYPES BY CURRENCY (NEW) ---
+// ------------------------------------------------------------------------------------------------
+// 🚨 PROTECTED ROUTE
+app.get('/api/client/transfer-types', verifyClientToken, async (req, res) => {
+    const userId = req.user.id;
+    console.log(`\n--- Received Request for Transfer Types for Client ID: ${userId} ---`);
+
+    try {
+        const user = await User.findById(userId).select('currency');
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        const currency = user.currency.toUpperCase();
+
+        const transferTypes = {
+            'USD': [
+                'Transfer between own accounts', 
+                'ACH Transfer (Domestic)', 
+                'Wire Transfer (Domestic)', 
+                'International Wire Transfer'
+            ],
+            'GBP': [
+                'Transfer between own accounts',
+                'Faster Payments (UK)', 
+                'BACS Transfer (UK)', 
+                'SWIFT Transfer (International)'
+            ],
+            'EUR': [
+                'Transfer between own accounts',
+                'SEPA Credit Transfer (Eurozone)', 
+                'SEPA Instant Credit Transfer', 
+                'International SWIFT Transfer'
+            ],
+            'CAD': [
+                'Transfer between own accounts',
+                'Interac e-Transfer', 
+                'EFT (Electronic Fund Transfer)', 
+                'Wire Transfer (Domestic/International)'
+            ],
+            'AUD': [
+                'Transfer between own accounts',
+                'OSKO Payment (Fast)',
+                'BPay (Bills)', 
+                'International SWIFT Transfer'
+            ]
+        };
+        
+        const types = transferTypes[currency] || [
+            'Transfer between own accounts',
+            'Standard Bank Transfer', 
+            'International Transfer'
+        ];
+
+        console.log(`✅ Transfer types fetched for currency: ${currency}.`);
+        res.status(200).json({ success: true, currency: currency, transferTypes: types });
+
+    } catch (error) {
+        console.error('Error fetching transfer types:', error);
+        res.status(500).json({ success: false, message: 'Server error while retrieving transfer types.' });
+    }
+});
+
+// ----------------------------------------------------
+// --- CLIENT API: FETCH TRANSFER MESSAGE CONFIG ---
+// ----------------------------------------------------
+/**
+ * GET /api/client/transfer-message
+ * Retrieves the transfer message configuration (isActive and messageContent)
+ * for the currently authenticated user.
+ */
+app.get('/api/client/transfer-message', verifyClientToken, async (req, res) => {
+    // req.user.id is set by the verifyClientToken middleware
+    const userId = req.user.id; 
+
+    console.log(`\n--- Received Client Transfer Message Request for User ID: ${userId} ---`);
+
+    try {
+        const user = await User.findById(userId)
+            // Only select the specific nested field needed
+            .select('transferMessage') 
+            .lean();
+
+        if (!user) {
+            console.log(`❌ Message fetch failed: User ID ${userId} not found.`);
+            return res.status(404).json({ success: false, message: 'User data not found.' });
+        }
+        
+        // Return the transferMessage object, defaulting to an inactive state if null
+        const messageConfig = user.transferMessage || { isActive: false, messageContent: "" };
+
+        console.log(`✅ Transfer message fetched. Active: ${messageConfig.isActive}.`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Transfer message configuration retrieved.',
+            transferMessage: messageConfig
+        });
+
+    } catch (error) {
+        console.error('Error fetching client transfer message:', error);
+        res.status(500).json({ success: false, message: 'Server error while retrieving transfer message configuration.' });
+    }
+});
+
+// ------------------------------------------------------------
+// 🚨🚨 CRITICAL FIX: MOVE STATIC FILE SERVING TO THE VERY END 🚨🚨
+// ------------------------------------------------------------
+
+// Make the 'uploads' folder publicly accessible 
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve all static files from the project root
+// This MUST come AFTER all API routes, otherwise it intercepts API calls 
+// for paths that don't exist as files and sends an HTML file instead, 
+// causing the "Unexpected token '<'" error on the client side.
+app.use(express.static(path.join(__dirname))); 
+
+app.get('/', (req, res) => {
+    // If you want the root URL to explicitly load the main client file
+    res.sendFile(path.join(__dirname, 'create-user-account.html')); 
+});
+
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
+});
+
+// --- SERVER START ---
+app.listen(PORT, () => {
+    console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
+    console.log('✅ Frontend Available at: http://localhost:3000/');
+    console.log(`Client API Endpoint (POST): http://localhost:${PORT}/api/users`);
+    console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`); // Added console log for user login
+    console.log(`Admin Login API: http://localhost:${PORT}/api/admins/login`);
+    console.log(`Fund Transfer API: http://localhost:${PORT}/api/funds/transfer (PROTECTED)`);
+    console.log(`Card Generation API (ADMIN): http://localhost:${PORT}/api/cards/generate (PROTECTED)`);
+    console.log(`🚨 JWT Secret Loaded: ${JWT_SECRET ? 'YES' : 'NO'}`);
+    console.log('------------------------------------------------------------');
+});
