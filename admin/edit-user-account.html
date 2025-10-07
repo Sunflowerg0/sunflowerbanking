@@ -171,300 +171,302 @@
         </div>
     </main>
 
-
 <script>
-    // --- API ENDPOINT SIMULATION ---
-    const USERS_API_BASE_URL = '/api/users';
-    const loginPage = 'admin-login.html'; 
-    const userListPage = 'view-user-account.html'; // Assuming this lists all users
+    // --- API ENDPOINT SIMULATION ---
+    const USERS_API_BASE_URL = '/api/users';
+    const loginPage = 'admin-login.html'; 
+    const userListPage = 'view-user-account.html'; // Assuming this lists all users
 
-    let currentUserId = null;
-    let originalUser = {}; // To store the fetched user data
+    let currentUserId = null;
+    let originalUser = {}; // To store the fetched user data
 
-    // Helper function for navigation
-    window.goToUserList = () => {
-        window.location.href = userListPage; 
-    }
+    // Helper function for navigation
+    window.goToUserList = () => {
+        window.location.href = userListPage; 
+    }
 
-    /**
-     * Clears local storage and redirects to the login page.
-     */
-    const logoutAndRedirect = () => {
-        localStorage.removeItem('adminToken');
-        localStorage.removeItem('adminName');
-        showToast('Session expired or unauthorized. Please log in again.', 'error');
-        setTimeout(() => { window.location.href = loginPage; }, 1500);
-    }
+    /**
+     * Clears local storage and redirects to the login page.
+     */
+    const logoutAndRedirect = () => {
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminName');
+        showToast('Session expired or unauthorized. Please log in again.', 'error');
+        setTimeout(() => { window.location.href = loginPage; }, 1500);
+    }
 
-    // --- Custom Toast/Notification Function ---
-    const showToast = (message, type = 'success') => {
-        const toastContainer = document.getElementById('toast-container');
-        
-        let baseClasses = "p-4 rounded-lg shadow-xl text-sm font-semibold flex items-center min-w-max opacity-0 transition-all duration-500 ease-out transform translate-x-full";
-        let iconSvg = '';
+    // --- Custom Toast/Notification Function ---
+    const showToast = (message, type = 'success') => {
+        const toastContainer = document.getElementById('toast-container');
+        
+        let baseClasses = "p-4 rounded-lg shadow-xl text-sm font-semibold flex items-center min-w-max opacity-0 transition-all duration-500 ease-out transform translate-x-full";
+        let iconSvg = '';
 
-        switch (type) {
-            case 'success':
-                baseClasses += " bg-green-500 text-white";
-                iconSvg = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2l4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
-                break;
-            case 'error':
-                baseClasses += " bg-red-600 text-white"; 
-                iconSvg = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
-                break;
-            case 'info':
-            default:
-                baseClasses += " bg-bank-blue text-white"; 
-                iconSvg = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
-                break;
-        }
+        switch (type) {
+            case 'success':
+                baseClasses += " bg-green-500 text-white";
+                iconSvg = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2l4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                break;
+            case 'error':
+                baseClasses += " bg-red-600 text-white"; 
+                iconSvg = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                break;
+            case 'info':
+            default:
+                baseClasses += " bg-bank-blue text-white"; 
+                iconSvg = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                break;
+        }
 
-        const toastElement = document.createElement('div');
-        toastElement.className = baseClasses;
-        toastElement.innerHTML = iconSvg + `<span>${message}</span>`;
-        
-        toastContainer.appendChild(toastElement);
+        const toastElement = document.createElement('div');
+        toastElement.className = baseClasses;
+        toastElement.innerHTML = iconSvg + `<span>${message}</span>`;
+        
+        toastContainer.appendChild(toastElement);
 
-        // Animate in
-        setTimeout(() => {
-            toastElement.classList.remove('translate-x-full', 'opacity-0');
-        }, 10); 
+        // Animate in
+        setTimeout(() => {
+            toastElement.classList.remove('translate-x-full', 'opacity-0');
+        }, 10); 
 
-        // Animate out and remove
-        setTimeout(() => {
-            toastElement.classList.add('translate-x-full', 'opacity-0');
-            const removeToast = () => {
-                toastElement.removeEventListener('transitionend', removeToast);
-                toastElement.remove();
-            };
-            toastElement.addEventListener('transitionend', removeToast);
-        }, 3000);
-    };
-    
-    /**
-     * Previews the selected profile picture.
-     */
-    window.previewProfilePicture = (event) => {
-        const preview = document.getElementById('profile-preview');
-        const file = event.target.files[0];
-        if (file) {
-            preview.src = URL.createObjectURL(file);
-        }
-    };
+        // Animate out and remove
+        setTimeout(() => {
+            toastElement.classList.add('translate-x-full', 'opacity-0');
+            const removeToast = () => {
+                toastElement.removeEventListener('transitionend', removeToast);
+                toastElement.remove();
+            };
+            toastElement.addEventListener('transitionend', removeToast);
+        }, 3000);
+    };
+    
+    /**
+     * Previews the selected profile picture.
+     */
+    window.previewProfilePicture = (event) => {
+        const preview = document.getElementById('profile-preview');
+        const file = event.target.files[0];
+        if (file) {
+            preview.src = URL.createObjectURL(file);
+        }
+    };
 
-    /**
-     * Displays account details in a formatted list.
-     */
-    const displayAccountDetails = (accounts, currency) => {
-        const container = document.getElementById('account-details-container');
-        container.innerHTML = ''; // Clear previous content
+    /**
+     * Displays account details in a formatted list.
+     */
+    const displayAccountDetails = (accounts, currency) => {
+        const container = document.getElementById('account-details-container');
+        container.innerHTML = ''; // Clear previous content
 
-        if (!accounts || accounts.length === 0) {
-            container.innerHTML = '<p class="text-gray-500">No account data available.</p>';
-            return;
-        }
+        // FIX: Ensure accounts is an array before trying to use .length or .forEach
+        const accountList = Array.isArray(accounts) ? accounts : [];
 
-        const formatter = new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: currency,
-            minimumFractionDigits: 2,
-        });
+        if (accountList.length === 0) {
+            container.innerHTML = '<p class="text-gray-500">No account data available.</p>';
+            return;
+        }
 
-        accounts.forEach(account => {
-            const balance = formatter.format(account.balance || 0);
-            const accountDiv = document.createElement('div');
-            accountDiv.className = 'flex justify-between border-b last:border-b-0 py-2';
-            accountDiv.innerHTML = `
-                <span class="font-medium text-gray-700">${account.accountType} Account:</span>
-                <span class="font-mono text-sm text-bank-blue font-semibold">${account.accountNumber}</span>
-                <span class="font-bold text-lg text-green-600">${balance}</span>
-            `;
-            container.appendChild(accountDiv);
-        });
-    }
+        const formatter = new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currency,
+            minimumFractionDigits: 2,
+        });
 
-    /**
-     * Populates the form fields with the fetched user data.
-     */
-    const populateForm = (user) => {
-        // --- Display Headers ---
-        document.getElementById('display-full-name').textContent = user.fullName || "User Account";
-        document.getElementById('display-user-id-name').textContent = user.userIdName || "N/A";
-        
-        // --- Form Fields ---
-        document.getElementById('userIdName').value = user.userIdName || ''; // NEW FIELD
-        document.getElementById('fullName').value = user.fullName || '';
-        document.getElementById('email').value = user.email || '';
-        document.getElementById('address').value = user.address || '';
-        document.getElementById('occupation').value = user.occupation || '';
-        document.getElementById('gender').value = user.gender || '';
-        document.getElementById('currency').value = user.currency || 'USD'; // Ensure this updates the dropdown
-        
-        // Format DOB for HTML date input
-        if (user.dob) {
-            const date = new Date(user.dob);
-            const formattedDate = date.toISOString().split('T')[0];
-            document.getElementById('dob').value = formattedDate;
-        } else {
-            document.getElementById('dob').value = '';
-        }
+        accountList.forEach(account => {
+            const balance = formatter.format(account.balance || 0);
+            const accountDiv = document.createElement('div');
+            accountDiv.className = 'flex justify-between border-b last:border-b-0 py-2';
+            accountDiv.innerHTML = `
+                <span class="font-medium text-gray-700">${account.accountType} Account:</span>
+                <span class="font-mono text-sm text-bank-blue font-semibold">${account.accountNumber}</span>
+                <span class="font-bold text-lg text-green-600">${balance}</span>
+            `;
+            container.appendChild(accountDiv);
+        });
+    }
 
-        // Set profile picture preview
-        const profilePreview = document.getElementById('profile-preview');
-        if (user.profilePicturePath) {
-            profilePreview.src = user.profilePicturePath;
-        } else {
-            profilePreview.src = "https://placehold.co/100x100/eeeeee/000000?text=No+Image";
-        }
+    /**
+     * Populates the form fields with the fetched user data.
+     */
+    const populateForm = (user) => {
+        // --- Display Headers ---
+        document.getElementById('display-full-name').textContent = user.fullName || "User Account";
+        document.getElementById('display-user-id-name').textContent = user.userIdName || "N/A";
+        
+        // --- Form Fields ---
+        document.getElementById('userIdName').value = user.userIdName || ''; // NEW FIELD
+        document.getElementById('fullName').value = user.fullName || '';
+        document.getElementById('email').value = user.email || '';
+        document.getElementById('address').value = user.address || '';
+        document.getElementById('occupation').value = user.occupation || '';
+        document.getElementById('gender').value = user.gender || '';
+        document.getElementById('currency').value = user.currency || 'USD'; // Ensure this updates the dropdown
+        
+        // Format DOB for HTML date input
+        if (user.dob) {
+            const date = new Date(user.dob);
+            const formattedDate = date.toISOString().split('T')[0];
+            document.getElementById('dob').value = formattedDate;
+        } else {
+            document.getElementById('dob').value = '';
+        }
 
-        // --- Display Account Details ---
-        displayAccountDetails(user.accounts, user.currency || 'USD');
-    };
+        // Set profile picture preview
+        const profilePreview = document.getElementById('profile-preview');
+        if (user.profilePicturePath) {
+            profilePreview.src = user.profilePicturePath;
+        } else {
+            profilePreview.src = "https://placehold.co/100x100/eeeeee/000000?text=No+Image";
+        }
 
-    /**
-     * Fetches user data using GET /api/users/:id
-     */
-    window.fetchUserData = async () => { 
-        const loadingIndicator = document.getElementById('loading-indicator');
-        const form = document.getElementById('edit-user-form');
-        const token = localStorage.getItem('adminToken'); 
+        // --- Display Account Details ---
+        displayAccountDetails(user.accounts, user.currency || 'USD');
+    };
 
-        loadingIndicator.classList.remove('hidden');
-        form.classList.add('hidden');
+    /**
+     * Fetches user data using GET /api/users/:id
+     */
+    window.fetchUserData = async () => { 
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const form = document.getElementById('edit-user-form');
+        const token = localStorage.getItem('adminToken'); 
 
-        try {
-            const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}` 
-                },
-            });
-            
-            if (response.status === 401 || response.status === 403) {
-                logoutAndRedirect();
-                return;
-            }
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-            }
-            
-            const user = await response.json();
-            originalUser = user; // Store original data
-            
-            populateForm(user);
+        loadingIndicator.classList.remove('hidden');
+        form.classList.add('hidden');
 
-        } catch (error) {
-            console.error("Error fetching user data:", error);
-            showToast(`Failed to load user data. Reason: ${error.message || 'Network error.'}`, 'error');
+        try {
+            const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}` 
+                },
+            });
+            
+            if (response.status === 401 || response.status === 403) {
+                logoutAndRedirect();
+                return;
+            }
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            }
+            
+            const user = await response.json();
+            originalUser = user; // Store original data
+            
+            populateForm(user);
 
-        } finally {
-            loadingIndicator.classList.add('hidden');
-            form.classList.remove('hidden');
-        }
-    };
+        } catch (error) {
+            console.error("Error fetching user data:", error);
+            showToast(`Failed to load user data. Reason: ${error.message || 'Network error.'}`, 'error');
 
-    /**
-     * Submits the form data to update the user using PUT /api/users/:id
-     */
-    window.submitUserUpdate = async () => {
-        const token = localStorage.getItem('adminToken');
-        if (!token) { logoutAndRedirect(); return; }
+        } finally {
+            loadingIndicator.classList.add('hidden');
+            form.classList.remove('hidden');
+        }
+    };
 
-        const form = document.getElementById('edit-user-form');
-        const formData = new FormData(form);
-        const saveBtn = document.getElementById('save-user-btn');
+    /**
+     * Submits the form data to update the user using PUT /api/users/:id
+     */
+    window.submitUserUpdate = async () => {
+        const token = localStorage.getItem('adminToken');
+        if (!token) { logoutAndRedirect(); return; }
 
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
-        showToast(`Attempting to update ${originalUser.fullName || 'user'}...`, 'info');
+        const form = document.getElementById('edit-user-form');
+        const formData = new FormData(form);
+        const saveBtn = document.getElementById('save-user-btn');
 
-        try {
-            // Check for required fields before sending
-            if (!formData.get('userIdName') || !formData.get('fullName') || !formData.get('email') || !formData.get('currency')) {
-                throw new Error("Username, Full Name, Email, and Currency are required fields.");
-            }
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        showToast(`Attempting to update ${originalUser.fullName || 'user'}...`, 'info');
 
-            // Client-side validation for PIN
-            const pin = formData.get('transferPin');
-            if (pin && !/^\d{4}$/.test(pin)) {
-                throw new Error("Transfer PIN must be exactly 4 numeric digits.");
-            }
-            
-            // Client-side validation for Password
-            const password = formData.get('userPassword');
-            if (password && password.length < 8) {
-                throw new Error("New password must be at least 8 characters long.");
-            }
-            
-            // Note: The form data is sent as 'multipart/form-data' because of the profilePicture file input.
-            const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${token}` 
-                },
-                body: formData,
-            });
+        try {
+            // Check for required fields before sending
+            if (!formData.get('userIdName') || !formData.get('fullName') || !formData.get('email') || !formData.get('currency')) {
+                throw new Error("Username, Full Name, Email, and Currency are required fields.");
+            }
 
-            if (response.status === 401 || response.status === 403) {
-                logoutAndRedirect();
-                return;
-            }
+            // Client-side validation for PIN
+            const pin = formData.get('transferPin');
+            if (pin && !/^\d{4}$/.test(pin)) {
+                throw new Error("Transfer PIN must be exactly 4 numeric digits.");
+            }
+            
+            // Client-side validation for Password
+            const password = formData.get('userPassword');
+            if (password && password.length < 8) {
+                throw new Error("New password must be at least 8 characters long.");
+            }
+            
+            // Note: The form data is sent as 'multipart/form-data' because of the profilePicture file input.
+            const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}` 
+                },
+                body: formData,
+            });
 
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.message || `API failed with status ${response.status}.`);
-            }
-            
-            // Success: Re-fetch the new data to update the form fields/preview
-            // This is crucial to show the newly generated account numbers if the currency was changed.
-            await fetchUserData();
-            
-            showToast(data.message || `Account updated successfully!`, 'success');
+            if (response.status === 401 || response.status === 403) {
+                logoutAndRedirect();
+                return;
+            }
 
-        } catch (error) {
-            console.error("Error updating user:", error);
-            showToast(`Update Failed. Reason: ${error.message || 'An unknown error occurred.'}`, 'error');
-            
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Save Changes';
-            // Clear password/pin fields after attempt to ensure they aren't accidentally re-submitted
-            document.getElementById('userPassword').value = '';
-            document.getElementById('transferPin').value = '';
-            document.getElementById('profilePicture').value = ''; // Clear file input
-        }
-    };
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.message || `API failed with status ${response.status}.`);
+            }
+            
+            // Success: Re-fetch the new data to update the form fields/preview
+            // This is crucial to show the newly generated account numbers if the currency was changed.
+            await fetchUserData();
+            
+            showToast(data.message || `Account updated successfully!`, 'success');
+
+        } catch (error) {
+            console.error("Error updating user:", error);
+            showToast(`Update Failed. Reason: ${error.message || 'An unknown error occurred.'}`, 'error');
+            
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Changes';
+            // Clear password/pin fields after attempt to ensure they aren't accidentally re-submitted
+            document.getElementById('userPassword').value = '';
+            document.getElementById('transferPin').value = '';
+            document.getElementById('profilePicture').value = ''; // Clear file input
+        }
+    };
 
 
-    // ----------------------------------------------------------------------
-    // --- INITIALIZATION ON LOAD ---
-    // ----------------------------------------------------------------------
-    document.addEventListener('DOMContentLoaded', () => {
-        const token = localStorage.getItem('adminToken');
-        const urlParams = new URLSearchParams(window.location.search);
-        const userId = urlParams.get('id');
+    // ----------------------------------------------------------------------
+    // --- INITIALIZATION ON LOAD ---
+    // ----------------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', () => {
+        const token = localStorage.getItem('adminToken');
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('id');
 
-        // 1. Check Auth and User ID
-        if (!token) {
-            console.warn("No admin token found. Redirecting to login.");
-            logoutAndRedirect();
-            return; 
-        }
-        if (!userId) {
-            showToast("Error: No User ID provided in the URL.", 'error');
-            setTimeout(() => { window.location.href = userListPage; }, 2000);
-            return; 
-        }
-        
-        currentUserId = userId;
-        document.getElementById('display-user-id').textContent = userId;
+        // 1. Check Auth and User ID
+        if (!token) {
+            console.warn("No admin token found. Redirecting to login.");
+            logoutAndRedirect();
+            return; 
+        }
+        if (!userId) {
+            showToast("Error: No User ID provided in the URL.", 'error');
+            setTimeout(() => { window.location.href = userListPage; }, 2000);
+            return; 
+        }
+        
+        currentUserId = userId;
+        document.getElementById('display-user-id').textContent = userId;
 
-        // 2. Fetch User Data
-        fetchUserData(); 
-    });
+        // 2. Fetch User Data
+        fetchUserData(); 
+    });
 
 </script>
 </body>
