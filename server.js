@@ -3412,7 +3412,6 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
         res.status(500).json({ success: false, message: 'Server error during deposit submission.' });
     }
 });
-
 // ------------------------------------------------------------
 // 🚨🚨 CRITICAL FIX: MOVE STATIC FILE SERVING TO THE VERY END 🚨🚨
 // ------------------------------------------------------------
@@ -3421,7 +3420,6 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
 // This function must exist because it is called by connectDB().
 async function populateInitialData() {
     // You should add logic here to check for and create default admin users, etc.
-    // For now, we will add the minimum code required to prevent the ReferenceError.
     
     // NOTE: You'll need to define your Mongoose models (like 'Admin') before this point.
     // Example placeholder:
@@ -3447,10 +3445,11 @@ async function connectDB() {
     if (mongoose.connection.readyState !== 1) { 
         console.log('Attempting to connect to MongoDB...');
         try {
+            // Using process.env.MONGODB_URI directly as no local const was shown
             await mongoose.connect(process.env.MONGODB_URI);
             console.log('MongoDB connected successfully!');
             
-            // This runs ONLY AFTER a successful connection. Now the function exists.
+            // This runs ONLY AFTER a successful connection.
             await populateInitialData(); 
             
         } catch (error) {
@@ -3461,10 +3460,34 @@ async function connectDB() {
         console.log('MongoDB already connected.');
     }
 }
-// ... (rest of your app.use, app.get, and server start logic is placed after the function definitions) ...
 
-// ... (Existing Express Routes and Static Serving below) ...
 
+// ----------------------------------------------------------------------------------
+// 🚀 EXPRESS ROUTING AND MIDDLEWARE DEFINITIONS (MUST BE HERE)
+// ----------------------------------------------------------------------------------
+
+// Make the 'uploads' folder publicly accessible 
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// 👈 FIX: Route handler to serve the main index.html file at the root URL
+app.get('/', (req, res) => {
+    // Load the confirmed public file (index.html) at the root URL
+    res.sendFile(path.join(__dirname, 'index.html')); 
+});
+
+// Route for the user dashboard
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
+});
+
+// Serve all other static files from the project root
+// This MUST come AFTER all API routes and explicit routes like app.get('/')
+app.use(express.static(path.join(__dirname))); 
+
+
+// ----------------------------------------------------------------------------------
+// --- SERVER START LOGIC (LAST THING IN THE FILE) ---
+// ----------------------------------------------------------------------------------
 const PORT = process.env.PORT || 8080;
 
 connectDB().then(() => {
@@ -3489,6 +3512,7 @@ connectDB().then(() => {
         
     });
 }).catch(err => {
+    // This executes ONLY if the database connection failed
     console.error('❌ Server startup failed due to database error. Exiting process.', err);
     process.exit(1);   
 });
