@@ -13,8 +13,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer'); 
 
 const app = express();
-const PORT = 3000;
-
+const PORT = process.env.PORT || 8080;
 // NEW: Use express.json() middleware for parsing JSON bodies in API requests
 app.use(express.json());
 
@@ -732,7 +731,6 @@ const verifyClientToken = (req, res, next) => {
     }
 };
 
-// --- OTP / 2FA HELPER FUNCTIONS ---
 
 // Generates a random 6-digit OTP
 function generateOTP() {
