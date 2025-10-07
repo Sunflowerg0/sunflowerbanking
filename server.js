@@ -1061,7 +1061,6 @@ app.get('/api/users/:id', verifyAdminToken, async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error while retrieving user data.' });
     }
 });
-
 // --- API for EDIT USER (edit-user-account & admin-message submission) ---
 // 🚨 PROTECTED ROUTE - CORRECTED LOGIC FOR ANNOUNCEMENT AND ISSUE MESSAGES
 app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), async (req, res) => {
@@ -1086,9 +1085,10 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
 
         let changes = {};
 
-        // Helper function to process and validate message updates
+        // Helper function to process and validate message updates (omitted for brevity, assume correct)
         const handleMessageUpdate = (messageKey, messageObj) => {
-            if (messageObj) {
+            // ... (Existing implementation remains unchanged) ...
+             if (messageObj) {
                 // Ensure payload contains the expected structure
                 if (typeof messageObj.isActive === 'boolean' && typeof messageObj.messageContent === 'string') {
                     
@@ -1134,12 +1134,13 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
 
         // 3. Handle Profile Picture update
         if (profileFile) {
-            deleteProfilePicture(user.profilePicturePath);
+            // Only delete if a previous path exists
+            if (user.profilePicturePath) deleteProfilePicture(user.profilePicturePath); 
             changes.profilePicturePath = `/uploads/${profileFile.filename}`;
             console.log(`✅ Profile picture uploaded: ${changes.profilePicturePath}`);
         }
 
-        // 4. Handle Currency/Account Details update
+        // 4. Handle Currency/Account Details update (omitted for brevity, assume correct)
         if (updateData.currency && updateData.currency !== user.currency) {
             console.log(`🔄 Currency changed from ${user.currency} to ${updateData.currency}. Regenerating account details...`);
             
@@ -1154,24 +1155,25 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
             changes.currency = updateData.currency;
         }
         
-        // ----------------------------------------------------------------
-        // 5. Handle Conditional Message Configuration (New Logic)
-        // ----------------------------------------------------------------
-        // Check for the TWO message types sent by the admin panel
+        // 5. Handle Conditional Message Configuration (New Logic) (omitted for brevity, assume correct)
         handleMessageUpdate('announcementMessage', updateData.announcementMessage);
         handleMessageUpdate('issueMessage', updateData.issueMessage);
         handleMessageUpdate('transferMessage', updateData.transferMessage);
         
         // ----------------------------------------------------------------
-        // OLD LOGIC CLEANUP: Removed 'updateData.transferMessage' check.
-        // If your frontend still sends 'transferMessage', this section handles its data but saves to the new fields.
-        // If the 'admin-message.html' is the only source, this is correct.
+        // 6. Handle other general fields, INCLUDING EMAIL 🔑
         // ----------------------------------------------------------------
-        
-        // 6. Handle other fields (non-login/non-file fields)
-        const allowedFields = ['fullName', 'dob', 'gender', 'address', 'occupation', 'status', 'userIdName'];
+        const allowedFields = ['fullName', 'dob', 'gender', 'address', 'occupation', 'status', 'userIdName', 'email'];
         allowedFields.forEach(key => {
             if (updateData[key] !== undefined && changes[key] === undefined) { 
+                
+                // Extra validation for email
+                if (key === 'email') {
+                    if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(updateData.email)) {
+                        throw new Error('Invalid email address format.');
+                    }
+                }
+                
                 changes[key] = updateData[key];
             }
         });
@@ -1198,8 +1200,9 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
         });
 
     } catch (dbError) {
-        // Handle custom validation error from message update helper
-        if (dbError.message.includes('content must be at least 5 characters long')) {
+        // Handle custom validation error from message update helper & email validation
+        if (dbError.message.includes('content must be at least 5 characters long') || 
+            dbError.message.includes('Invalid email address format.')) {
             if (profileFile) fs.unlinkSync(profileFile.path);
             return res.status(400).json({ success: false, message: dbError.message });
         }
@@ -1208,8 +1211,24 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
         if (profileFile) fs.unlinkSync(profileFile.path); // Clean up file on DB error
         
         if (dbError.code === 11000) {
-            const msg = `The User ID Name '${updateData.userIdName}' is already taken.`;
+            const key = Object.keys(dbError.keyValue)[0];
+            const value = dbError.keyValue[key];
+            
+            let msg = 'Database conflict occurred. Please retry.';
+            
+            // --- FIX: Explicitly check for 'userIdName' and 'email' duplication on update
+            if (key === 'userIdName') {
+                msg = `The User ID Name '${value}' is already taken by another user.`;
+            } else if (key === 'email') {
+                msg = `The email address '${value}' is already registered to another account.`;
+            }
+
             return res.status(409).json({ success: false, message: msg });
+        }
+
+        // Handle Mongoose validation error (e.g., required fields, type mismatch)
+        if (dbError.name === 'ValidationError') {
+            return res.status(400).json({ success: false, message: `Validation failed: ${dbError.message}` });
         }
 
         res.status(500).json({ success: false, message: 'Server error during user update.' });

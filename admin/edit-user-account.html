@@ -55,7 +55,7 @@
             <header class="mb-6 border-b pb-4">
                 <h2 class="text-xl sm:text-2xl font-extrabold text-bank-blue">Account Details for <span id="display-full-name">Loading...</span></h2>
                 <p class="text-gray-600 mt-1 text-xs sm:text-sm">
-                    Editing user ID: <strong id="display-user-id">Loading...</strong>
+                    Editing user ID: <strong id="display-user-id">Loading...</strong> | Username: <strong id="display-user-id-name">Loading...</strong>
                 </p>
                 <div id="loading-indicator" class="text-center p-6 text-bank-blue font-semibold">
                     <div class="flex items-center justify-center space-x-2">
@@ -69,10 +69,11 @@
             </header>
 
             <form id="edit-user-form" class="space-y-6 hidden" onsubmit="event.preventDefault(); submitUserUpdate()">
+                
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
-                        <label for="fullName" class="block text-sm font-medium text-gray-700">Full Name</label>
-                        <input type="text" id="fullName" name="fullName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm" required>
+                        <label for="userIdName" class="block text-sm font-medium text-gray-700">Username (User ID Name)</label>
+                        <input type="text" id="userIdName" name="userIdName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm" required>
                     </div>
 
                     <div>
@@ -80,13 +81,19 @@
                         <input type="email" id="email" name="email" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm" required>
                     </div>
                 </div>
-
+                
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div>
+                        <label for="fullName" class="block text-sm font-medium text-gray-700">Full Name</label>
+                        <input type="text" id="fullName" name="fullName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm" required>
+                    </div>
                     <div>
                         <label for="dob" class="block text-sm font-medium text-gray-700">Date of Birth</label>
                         <input type="date" id="dob" name="dob" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm">
                     </div>
+                </div>
 
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
                         <label for="gender" class="block text-sm font-medium text-gray-700">Gender</label>
                         <select id="gender" name="gender" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm">
@@ -96,31 +103,36 @@
                             <option value="Other">Other</option>
                         </select>
                     </div>
+                     <div>
+                        <label for="occupation" class="block text-sm font-medium text-gray-700">Occupation</label>
+                        <input type="text" id="occupation" name="occupation" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm">
+                    </div>
                 </div>
 
                 <div>
                     <label for="address" class="block text-sm font-medium text-gray-700">Address</label>
                     <input type="text" id="address" name="address" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm">
                 </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div>
-                        <label for="occupation" class="block text-sm font-medium text-gray-700">Occupation</label>
-                        <input type="text" id="occupation" name="occupation" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm">
+                
+                <div class="border-t border-b py-4">
+                    <h3 class="text-lg font-semibold text-bank-blue mb-3">Bank Account Information</h3>
+                    
+                    <div id="account-details-container" class="space-y-3 p-3 bg-gray-50 rounded-lg border">
+                        <p class="text-gray-500">No account data available.</p>
                     </div>
 
-                    <div>
+                    <div class="mt-4">
                         <label for="currency" class="block text-sm font-medium text-gray-700">Preferred Currency</label>
                         <select id="currency" name="currency" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-bank-blue focus:border-bank-blue sm:text-sm" required>
                             <option value="USD">USD - US Dollar</option>
                             <option value="EUR">EUR - Euro</option>
                             <option value="GBP">GBP - British Pound</option>
-                            <option value="NGN">NGN - Nigerian Naira</option>
+                            <option value="AUD">AUD - Australian Naira</option>
                             <option value="CAD">CAD - Canadian Dollar</option>
                         </select>
+                        <p class="text-xs text-red-500 mt-1">⚠️ Changing the currency will regenerate account numbers on the server side.</p>
                     </div>
                 </div>
-
                 <div class="border-t pt-4">
                     <h3 class="text-lg font-semibold text-red-600 mb-2">Security Updates (Optional)</h3>
                     <p class="text-xs text-gray-500 mb-4">Only fill these fields if you need to change the user's password or PIN. Leave blank to keep current values.</p>
@@ -240,17 +252,53 @@
         }
     };
 
+    /**
+     * Displays account details in a formatted list.
+     */
+    const displayAccountDetails = (accounts, currency) => {
+        const container = document.getElementById('account-details-container');
+        container.innerHTML = ''; // Clear previous content
+
+        if (!accounts || accounts.length === 0) {
+            container.innerHTML = '<p class="text-gray-500">No account data available.</p>';
+            return;
+        }
+
+        const formatter = new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currency,
+            minimumFractionDigits: 2,
+        });
+
+        accounts.forEach(account => {
+            const balance = formatter.format(account.balance || 0);
+            const accountDiv = document.createElement('div');
+            accountDiv.className = 'flex justify-between border-b last:border-b-0 py-2';
+            accountDiv.innerHTML = `
+                <span class="font-medium text-gray-700">${account.accountType} Account:</span>
+                <span class="font-mono text-sm text-bank-blue font-semibold">${account.accountNumber}</span>
+                <span class="font-bold text-lg text-green-600">${balance}</span>
+            `;
+            container.appendChild(accountDiv);
+        });
+    }
 
     /**
      * Populates the form fields with the fetched user data.
      */
     const populateForm = (user) => {
+        // --- Display Headers ---
+        document.getElementById('display-full-name').textContent = user.fullName || "User Account";
+        document.getElementById('display-user-id-name').textContent = user.userIdName || "N/A";
+        
+        // --- Form Fields ---
+        document.getElementById('userIdName').value = user.userIdName || ''; // NEW FIELD
         document.getElementById('fullName').value = user.fullName || '';
         document.getElementById('email').value = user.email || '';
         document.getElementById('address').value = user.address || '';
         document.getElementById('occupation').value = user.occupation || '';
         document.getElementById('gender').value = user.gender || '';
-        document.getElementById('currency').value = user.currency || 'USD';
+        document.getElementById('currency').value = user.currency || 'USD'; // Ensure this updates the dropdown
         
         // Format DOB for HTML date input
         if (user.dob) {
@@ -264,11 +312,13 @@
         // Set profile picture preview
         const profilePreview = document.getElementById('profile-preview');
         if (user.profilePicturePath) {
-            // Assuming the server serves uploads from the root, e.g., /uploads/filename.jpg
             profilePreview.src = user.profilePicturePath;
         } else {
             profilePreview.src = "https://placehold.co/100x100/eeeeee/000000?text=No+Image";
         }
+
+        // --- Display Account Details ---
+        displayAccountDetails(user.accounts, user.currency || 'USD');
     };
 
     /**
@@ -303,7 +353,6 @@
             const user = await response.json();
             originalUser = user; // Store original data
             
-            document.getElementById('display-full-name').textContent = user.fullName || "User Account";
             populateForm(user);
 
         } catch (error) {
@@ -333,8 +382,8 @@
 
         try {
             // Check for required fields before sending
-            if (!formData.get('fullName') || !formData.get('email') || !formData.get('currency')) {
-                throw new Error("Full Name, Email, and Currency are required fields.");
+            if (!formData.get('userIdName') || !formData.get('fullName') || !formData.get('email') || !formData.get('currency')) {
+                throw new Error("Username, Full Name, Email, and Currency are required fields.");
             }
 
             // Client-side validation for PIN
@@ -350,12 +399,9 @@
             }
             
             // Note: The form data is sent as 'multipart/form-data' because of the profilePicture file input.
-            // The backend (Node/Express with Multer) handles the file and extracts the text fields from formData.
             const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
                 method: 'PUT',
                 headers: {
-                    // DO NOT set 'Content-Type': 'application/json' when using FormData for file uploads.
-                    // The browser sets 'Content-Type': 'multipart/form-data' automatically.
                     'Authorization': `Bearer ${token}` 
                 },
                 body: formData,
@@ -373,6 +419,7 @@
             }
             
             // Success: Re-fetch the new data to update the form fields/preview
+            // This is crucial to show the newly generated account numbers if the currency was changed.
             await fetchUserData();
             
             showToast(data.message || `Account updated successfully!`, 'success');
