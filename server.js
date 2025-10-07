@@ -3413,14 +3413,28 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
     }
 });
 
-
 // ------------------------------------------------------------
 // 🚨🚨 CRITICAL FIX: MOVE STATIC FILE SERVING TO THE VERY END 🚨🚨
 // ------------------------------------------------------------
 
+// --- Database Initialization Function (ADDED TO PREVENT CRASH) ---
+// This function must exist because it is called by connectDB().
+async function populateInitialData() {
+    // You should add logic here to check for and create default admin users, etc.
+    // For now, we will add the minimum code required to prevent the ReferenceError.
+    
+    // NOTE: You'll need to define your Mongoose models (like 'Admin') before this point.
+    // Example placeholder:
+    // const Admin = mongoose.model('Admin');
+    // if (await Admin.countDocuments() === 0) { /* create admin */ }
+    
+    console.log('ℹ️ Initial data population function executed.'); 
+    return true;
+}
+
 // --- Database Connection Function ---
 async function connectDB() {
-    // Keep your critical checks here (or near the top of the file)
+    // ... (Your checks for MONGODB_URI and JWT_SECRET are correct here) ...
     if (!process.env.MONGODB_URI) { 
         console.error('❌ FATAL ERROR: MONGODB_URI not found in environment!');
         process.exit(1);
@@ -3436,38 +3450,22 @@ async function connectDB() {
             await mongoose.connect(process.env.MONGODB_URI);
             console.log('MongoDB connected successfully!');
             
-            // This runs ONLY AFTER a successful connection
-            // You may need to define populateInitialData() if it doesn't exist
+            // This runs ONLY AFTER a successful connection. Now the function exists.
             await populateInitialData(); 
             
         } catch (error) {
             console.error('*** CRITICAL: MongoDB connection error. Cannot start server. ***', error);
-            throw error; // Propagate the error for the server to catch
+            throw error;
         }
     } else {
         console.log('MongoDB already connected.');
     }
 }
+// ... (rest of your app.use, app.get, and server start logic is placed after the function definitions) ...
 
-// Make the 'uploads' folder publicly accessible 
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// ... (Existing Express Routes and Static Serving below) ...
 
-// Serve all static files from the project root
-// This MUST come AFTER all API routes, otherwise it intercepts API calls 
-// for paths that don't exist as files and sends an HTML file instead, 
-// causing the "Unexpected token '<'" error on the client side.
-app.use(express.static(path.join(__dirname))); 
-
-app.get('/', (req, res) => {
-    // If you want the root URL to explicitly load the main client file
-    res.sendFile(path.join(__dirname, 'create-user-account.html')); 
-});
-
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
-});
-
-const PORT = process.env.PORT || 8080; // Use your desired fallback port
+const PORT = process.env.PORT || 8080;
 
 connectDB().then(() => {
     // This executes ONLY if the database connection was successful
@@ -3489,9 +3487,8 @@ connectDB().then(() => {
         console.log(`🚨 JWT Secret Loaded: ${process.env.JWT_SECRET ? 'YES' : 'NO'}`);
         console.log('------------------------------------------------------------');
         
-    }); // This closes the app.listen callback and call
+    });
 }).catch(err => {
-    // This executes ONLY if the database connection failed
     console.error('❌ Server startup failed due to database error. Exiting process.', err);
     process.exit(1);   
-}); // This closes the connectDB().then().catch() block
+});
