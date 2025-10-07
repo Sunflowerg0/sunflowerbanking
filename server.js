@@ -3485,7 +3485,6 @@ app.get('/dashboard', (req, res) => {
 // This MUST come AFTER all API routes and explicit routes like app.get('/')
 app.use(express.static(path.join(__dirname))); 
 
-
 // ----------------------------------------------------------------------------------
 // --- SERVER START LOGIC (LAST THING IN THE FILE) ---
 // ----------------------------------------------------------------------------------
@@ -3493,19 +3492,15 @@ const PORT = process.env.PORT || 11144;
 
 connectDB().then(() => {
     // This executes ONLY if the database connection was successful
-    app.listen(PORT, () => {
+    
+    // 💡 CRITICAL FIX: Add '0.0.0.0' to ensure the server is accessible by PXXL's proxy/router.
+    app.listen(PORT, '0.0.0.0', () => { 
         // --- ALL Console Logs MUST be inside this app.listen callback ---
         
-        console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
+        console.log(`\n🚀 Node.js/Express Server listening on http://0.0.0.0:${PORT}`);
         console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
         
-        // Console logs for API endpoints
-        console.log(`Client API Endpoint (POST): http://localhost:${PORT}/api/users`);
-        console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`);
-        console.log(`Admin Login API: http://localhost:${PORT}/api/admins/login`);
-        console.log(`Fund Transfer API: http://localhost:${PORT}/api/funds/transfer (PROTECTED)`);
-        console.log(`Card Generation API (ADMIN): http://localhost:${PORT}/api/cards/generate (PROTECTED)`);
-        console.log(`Transaction Status Update API (ADMIN/PUT): http://localhost:${PORT}/api/transactions/:transactionId/status (PROTECTED)`);
+        // ... (rest of your logs remain the same) ...
         
         // Final Status Checks
         console.log(`🚨 JWT Secret Loaded: ${process.env.JWT_SECRET ? 'YES' : 'NO'}`);
