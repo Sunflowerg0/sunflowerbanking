@@ -3466,31 +3466,32 @@ app.get('/', (req, res) => {
 app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
 });
+
 const PORT = process.env.PORT || 8080; // Use your desired fallback port
 
 connectDB().then(() => {
     // This executes ONLY if the database connection was successful
     app.listen(PORT, () => {
+        // --- ALL Console Logs MUST be inside this app.listen callback ---
+        
         console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
-        // You can add the rest of your console logs here:
         console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
-        // ... (rest of your API endpoint logs using ${PORT})
-    });
+        
+        // Console logs for API endpoints
+        console.log(`Client API Endpoint (POST): http://localhost:${PORT}/api/users`);
+        console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`);
+        console.log(`Admin Login API: http://localhost:${PORT}/api/admins/login`);
+        console.log(`Fund Transfer API: http://localhost:${PORT}/api/funds/transfer (PROTECTED)`);
+        console.log(`Card Generation API (ADMIN): http://localhost:${PORT}/api/cards/generate (PROTECTED)`);
+        console.log(`Transaction Status Update API (ADMIN/PUT): http://localhost:${PORT}/api/transactions/:transactionId/status (PROTECTED)`);
+        
+        // Final Status Checks
+        console.log(`🚨 JWT Secret Loaded: ${process.env.JWT_SECRET ? 'YES' : 'NO'}`);
+        console.log('------------------------------------------------------------');
+        
+    }); // This closes the app.listen callback and call
 }).catch(err => {
     // This executes ONLY if the database connection failed
     console.error('❌ Server startup failed due to database error. Exiting process.', err);
-    process.exit(1);   
-});
-    
-    // 🚨 FIX: This line MUST use the ${PORT} variable to show the correct running port.
-    console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
-    
-    console.log(`Client API Endpoint (POST): http://localhost:${PORT}/api/users`);
-    console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`); // Added console log for user login
-    console.log(`Admin Login API: http://localhost:${PORT}/api/admins/login`);
-    console.log(`Fund Transfer API: http://localhost:${PORT}/api/funds/transfer (PROTECTED)`);
-    console.log(`Card Generation API (ADMIN): http://localhost:${PORT}/api/cards/generate (PROTECTED)`);
-    console.log(`Transaction Status Update API (ADMIN/PUT): http://localhost:${PORT}/api/transactions/:transactionId/status (PROTECTED)`);
-    console.log(`🚨 JWT Secret Loaded: ${JWT_SECRET ? 'YES' : 'NO'}`);
-    console.log('------------------------------------------------------------');
-});
+    process.exit(1);   
+}); // This closes the connectDB().then().catch() block
