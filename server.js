@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer'); 
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 // NEW: Use express.json() middleware for parsing JSON bodies in API requests
 app.use(express.json());
 
@@ -3444,25 +3444,23 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname))); 
 
 app.get('/', (req, res) => {
-    // If you want the root URL to explicitly load the main client file
-    res.sendFile(path.join(__dirname, 'create-user-account.html')); 
+    // If you want the root URL to explicitly load the main client file
+    res.sendFile(path.join(__dirname, 'create-user-account.html')); 
 });
 
 app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
+    res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
 });
 
 // --- SERVER START ---
 app.listen(PORT, () => {
-    // ROCKET: Shows the actual port the server is bound to (e.g., 46361)
     console.log(`\n🚀 Node.js/Express Server listening on http://localhost:${PORT}`);
     
-    // FIX: Use the actual PORT variable here instead of the hardcoded 8080.
+    // 🚨 FIX: This line MUST use the ${PORT} variable to show the correct running port.
     console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
     
-    // All API endpoints now correctly use the actual PORT
     console.log(`Client API Endpoint (POST): http://localhost:${PORT}/api/users`);
-    console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`);
+    console.log(`Client Login API (POST): http://localhost:${PORT}/api/users/login`); // Added console log for user login
     console.log(`Admin Login API: http://localhost:${PORT}/api/admins/login`);
     console.log(`Fund Transfer API: http://localhost:${PORT}/api/funds/transfer (PROTECTED)`);
     console.log(`Card Generation API (ADMIN): http://localhost:${PORT}/api/cards/generate (PROTECTED)`);
