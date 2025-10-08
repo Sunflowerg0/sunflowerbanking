@@ -1245,6 +1245,7 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
  */
 async function sendStatusUpdateEmail(userEmail, userName, transactionId, newStatus, notificationContext) {
     // NOTE: This assumes 'transporter' (defined with process.env variables) is accessible in this scope.
+    // If this file is imported, 'transporter' must be imported or passed in. Assuming it's a global/accessible dependency here.
     const LOGO_URL = 'https://i.imgur.com/Q6dsATF.png';
     const BANK_COLOR = '#0076a3'; // Primary bank color
     
@@ -1373,7 +1374,7 @@ async function sendStatusUpdateEmail(userEmail, userName, transactionId, newStat
     `;
 
     // -----------------------------------------------------
-    // 🛑 REMOVED SIMULATED LOGIC. USING LIVE TRANSPORTER.
+    // 🛑 LIVE EMAIL SENDING LOGIC
     // -----------------------------------------------------
     try {
         const info = await transporter.sendMail({
@@ -1389,6 +1390,7 @@ async function sendStatusUpdateEmail(userEmail, userName, transactionId, newStat
         console.log(`   Message ID: ${info.messageId}`);
         
     } catch (error) {
+        // This is the error handler for the live email attempt
         console.error(`\n❌ CRITICAL ERROR: Failed to send LIVE email to ${userEmail}.`);
         console.error(`   Error details:`, error.message);
     }
@@ -1401,48 +1403,48 @@ module.exports = { sendStatusUpdateEmail };
 // GET endpoint to fetch all transactions for a specific user (Admin Protected)
 // URL structure from frontend: /api/transactions/user/:userId
 app.get('/api/transactions/user/:userId', verifyAdminToken, async (req, res) => {
-    const { userId } = req.params;
+    const { userId } = req.params;
 
-    console.log(`\n--- Received Fetch Transactions Request for User ID: ${userId} ---`);
+    console.log(`\n--- Received Fetch Transactions Request for User ID: ${userId} ---`);
 
-    // --- 1. Basic Validation ---
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
-    }
+    // --- 1. Basic Validation ---
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
+    }
 
-    try {
-        // --- 2. Fetch User to ensure existence (optional, but good practice) ---
-        const userExists = await User.exists({ _id: userId });
-        if (!userExists) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
-        }
-        
-        // --- 3. Fetch all Transactions ---
-        const transactions = await Transaction.find({ userId: userId })
-            // Exclude __v, but include all fields required by the frontend
-            .select('-__v') 
-            .sort({ timestamp: -1 }); // Sort by newest first
+    try {
+        // --- 2. Fetch User to ensure existence (optional, but good practice) ---
+        const userExists = await User.exists({ _id: userId });
+        if (!userExists) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        
+        // --- 3. Fetch all Transactions ---
+        const transactions = await Transaction.find({ userId: userId })
+            // Exclude __v, but include all fields required by the frontend
+            .select('-__v') 
+            .sort({ timestamp: -1 }); // Sort by newest first
 
-        // Note: The frontend expects fields like _id, timestamp, accountId, description, amount, status, currency.
-        // We'll trust the Transaction model includes these.
+        // Note: The frontend expects fields like _id, timestamp, accountId, description, amount, status, currency.
+        // We'll trust the Transaction model includes these.
 
-        console.log(`✅ Fetched ${transactions.length} transactions for user ${userId}.`);
+        console.log(`✅ Fetched ${transactions.length} transactions for user ${userId}.`);
 
-        // --- 4. Success Response ---
-        res.status(200).json({
-            success: true,
-            transactions: transactions,
-            count: transactions.length
-        });
+        // --- 4. Success Response ---
+        res.status(200).json({
+            success: true,
+            transactions: transactions,
+            count: transactions.length
+        });
 
-    } catch (error) {
-        console.error('Database/Fetch Error (Admin Transactions):', error);
-        res.status(500).json({ success: false, message: 'Server error while retrieving user transactions.' });
-    }
+    } catch (error) {
+        console.error('Database/Fetch Error (Admin Transactions):', error);
+        res.status(500).json({ success: false, message: 'Server error while retrieving user transactions.' });
+    }
 });
 
 // =======================================================================
-// ⭐ REQUIRED PLACEHOLDER/UTILITY FUNCTIONS (Must be defined globally) ⭐
+// ⭐ UTILITY FUNCTIONS (Defined once and used globally) ⭐
 // =======================================================================
 
 /**
@@ -1456,15 +1458,11 @@ async function logStatusChange(txId, oldStatus, newStatus, adminId) {
     return true;
 }
 
-/**
- * Placeholder for the non-critical email sending function.
- * In a production app, this would use a library like nodemailer.
- */
-async function sendStatusUpdateEmail(email, fullName, transactionId, newStatus, contextMessage) {
-    // NOTE: Replace this console.log with your actual email sending logic.
-    console.log(`[EMAIL] Sent status update to ${email} (${fullName}): ${contextMessage} is now ${newStatus}. (TX: ${transactionId})`);
-    return true;
-}
+// -----------------------------------------------------------------------
+// THE DUPLICATE/MOCK sendStatusUpdateEmail FUNCTION WAS DELETED HERE.
+// THE LIVE FUNCTION AT THE TOP IS NOW CORRECTLY ACCESSIBLE.
+// -----------------------------------------------------------------------
+
 
 // =======================================================================
 // ⭐ TRANSACTION STATUS UPDATE ROUTE (The original code) ⭐
@@ -1654,7 +1652,6 @@ app.put('/api/transactions/:transactionId/status', verifyAdminToken, async (req,
         (async () => {
             try {
                 // A. Update Transaction History/Audit Log 
-                // NOTE: logStatusChange is now DEFINED above this route.
                 await logStatusChange(transactionId, transactionOldStatus, newStatus, adminId);
             } catch (err) {
                 // This catch block handles the history logging failure gracefully
@@ -1677,10 +1674,10 @@ app.put('/api/transactions/:transactionId/status', verifyAdminToken, async (req,
                     if (user && user.email) {
                         // Determine which transaction context to send (the debit leg for sender, or the credit leg for recipient)
                         const contextMessage = (userId.toString() === transactionUserId.toString()) ? 
-                                                'your transaction (debit leg)' : 
-                                                'a new credit/deposit';
+                                                     'your transaction (debit leg)' : 
+                                                     'a new credit/deposit';
 
-                        // sendStatusUpdateEmail is now DEFINED above this route.
+                        // sendStatusUpdateEmail is now the LIVE function defined at the top.
                         await sendStatusUpdateEmail(
                             user.email,
                             user.fullName || 'Valued Customer',
@@ -1691,6 +1688,7 @@ app.put('/api/transactions/:transactionId/status', verifyAdminToken, async (req,
                     }
                 }
             } catch (error) {
+                // This catch block handles the email failure gracefully (non-critical path)
                 console.error("Email sending failed (non-critical):", error);
             }
         })();
