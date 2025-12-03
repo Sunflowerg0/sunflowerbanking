@@ -1,31 +1,33 @@
 [build]
-  # Specify the directory where your build process outputs static files (if any).
-  # Since this is a serverless app relying on Node, we'll use the root, assuming index.html is there.
-  publish = "."
-  
-  # Specify the command to run before deployment (e.g., install dependencies for local builds)
-  # 💡 FIX: The 'No build command...' caused dependency errors. 
-  # We MUST run 'npm install' so Netlify bundles the required node modules (like serverless-http).
-  command = "npm install"
+  # Specify the directory where your build process outputs static files (if any).
+  # Since this is a serverless app relying on Node, we'll use the root, assuming index.html is there.
+  publish = "."
+  
+  # Specify the command to run before deployment (e.g., install dependencies for local builds)
+  # This command ensures all required node modules (like dotenv) are bundled for the functions.
+  command = "npm install"
 
 [functions]
-  # Directory where your Netlify Function files live.
-  # We use 'netlify/functions' where the handler file (api.js) is located.
-  directory = "netlify/functions"
-  
+  # Directory where your Netlify Function files live.
+  directory = "netlify/functions"
+  
+[context.production.environment]
+    # Specify a stable Node.js version
+    NODE_VERSION = "20" 
+
 # --- CRITICAL: Redirects and Serverless Function Routing ---
 # This section tells Netlify to treat any request starting with /api/
 # as a request to the serverless function named 'api' (which is netlify/functions/api.js).
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
-  status = 200
-  force = true
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
 
 # Fallback for the client-side single-page application (SPA)
 # If a request doesn't match an explicit file or API route, send it to index.html
 # This ensures client-side routing works when the user navigates directly to /dashboard or /login.
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+  from = "/*"
+  to = "/index.html"
+  status = 200
