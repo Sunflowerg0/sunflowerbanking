@@ -1,10 +1,8 @@
 [build]
 
-The directory containing your static assets. Changed from "public" to "."
+The directory containing your static assets. We use "." because index.html,
 
-to match the current file structure where index.html and the client/ and admin/
-
-directories are in the project root.
+client/, and admin/ are in the project root.
 
 publish = "."
 
@@ -15,7 +13,7 @@ command = "npm install"
 
 [[redirects]]
 
-This maps all requests starting with /api/ to the Netlify function handler
+This maps all requests starting with /api/ to the Netlify function handler.
 
 from = "/api/*"
 to = "/.netlify/functions/api/:splat"
@@ -23,7 +21,9 @@ status = 200
 
 [[redirects]]
 
-This redirects all other root requests to the static index.html file
+This redirects all other root requests to the static index.html file,
+
+allowing client-side routing for your dashboard.
 
 from = "/"
 to = "/index.html"
