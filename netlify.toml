@@ -1,30 +1,34 @@
 [build]
+  # Specify the directory where your build process outputs static files (if any).
+  # Since this is a serverless app relying on Node, we'll use the root, assuming index.html is there.
+  publish = "."
+  
+  # Specify the command to run before deployment (e.g., install dependencies for local builds)
+  # For simple Express apps, we often skip this or just ensure the dependencies are installed.
+  command = "echo 'No build command required for this setup'"
 
-The directory containing your static assets. We use "." because index.html,
+[functions]
+  # Directory where your Netlify Function files live.
+  # We use 'netlify/functions' where the handler file (api.js) is located.
+  directory = "netlify/functions"
+  
+  # Set Node.js version to ensure compatibility.
+  node_bundler = "esbuild"
+  node_version = "20" 
 
-client/, and admin/ are in the project root.
-
-publish = "."
-
-The directory where Netlify will find your functions
-
-functions = "netlify/functions"
-command = "npm install"
-
+# --- CRITICAL: Redirects and Serverless Function Routing ---
+# This section tells Netlify to treat any request starting with /api/
+# as a request to the serverless function named 'api' (which is netlify/functions/api.js).
 [[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
 
-This maps all requests starting with /api/ to the Netlify function handler.
-
-from = "/api/*"
-to = "/.netlify/functions/api/:splat"
-status = 200
-
+# Fallback for the client-side single-page application (SPA)
+# If a request doesn't match an explicit file or API route, send it to index.html
+# This ensures client-side routing works when the user navigates directly to /dashboard or /login.
 [[redirects]]
-
-This redirects all other root requests to the static index.html file,
-
-allowing client-side routing for your dashboard.
-
-from = "/"
-to = "/index.html"
-status = 200
+  from = "/*"
+  to = "/index.html"
+  status = 200

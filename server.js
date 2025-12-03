@@ -11,6 +11,8 @@ const SALT_ROUNDS = 10;
 const jwt = require('jsonwebtoken'); 
 const crypto = require('crypto');   
 const nodemailer = require('nodemailer'); 
+const serverless = require('serverless-http'); // Added for the local setup consistency
+
 
 const app = express();
 // NEW: Use express.json() middleware for parsing JSON bodies in API requests
@@ -22,6 +24,8 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL; 
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; 
 
 // --- 1. EMAIL TRANSPORT SETUP ---
 // Configuration to connect to an SMTP service (e.g., Gmail using an App Password)
@@ -3431,52 +3435,42 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
 });
 
 // ------------------------------------------------------------
-// 🚨🚨 CRITICAL FIX: MOVE STATIC FILE SERVING TO THE VERY END 🚨🚨
+// --- Database Initialization Function (MUST BE DEFINED HERE) ---
 // ------------------------------------------------------------
-
-// --- Database Initialization Function (ADDED TO PREVENT CRASH) ---
-// This function must exist because it is called by connectDB().
+// This function is called by netlify/functions/api.js to ensure the database
+// is seeded/checked immediately after a successful connection.
 async function populateInitialData() {
-    // You should add logic here to check for and create default admin users, etc.
+    // Since the User and Admin models are defined earlier, we can use them here.
+    const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
     
-    // NOTE: You'll need to define your Mongoose models (like 'Admin') before this point.
-    // Example placeholder:
-    // const Admin = mongoose.model('Admin');
-    // if (await Admin.countDocuments() === 0) { /* create admin */ }
-    
-    console.log('ℹ️ Initial data population function executed.'); 
-    return true;
-}
+    // 1. Check if the root Admin account exists
+    const existingAdmin = await Admin.findOne({ email: ADMIN_EMAIL });
 
-// --- Database Connection Function ---
-async function connectDB() {
-    // ... (Your checks for MONGODB_URI and JWT_SECRET are correct here) ...
-    if (!process.env.MONGODB_URI) { 
-        console.error('❌ FATAL ERROR: MONGODB_URI not found in environment!');
-        process.exit(1);
-    }
-    if (!process.env.JWT_SECRET) { 
-        console.error('❌ FATAL ERROR: JWT_SECRET not found in environment!');
-        process.exit(1);
-    }
-
-    if (mongoose.connection.readyState !== 1) { 
-        console.log('Attempting to connect to MongoDB...');
+    if (!existingAdmin) {
+        console.log(`ℹ️ Root Admin account (${ADMIN_EMAIL}) not found. Creating default admin...`);
+        
         try {
-            // Using process.env.MONGODB_URI directly as no local const was shown
-            await mongoose.connect(process.env.MONGODB_URI);
-            console.log('MongoDB connected successfully!');
+            // bcrypt is required here for hashing the default admin password
+            // Make sure bcrypt is imported at the top of server.js
+            const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
             
-            // This runs ONLY AFTER a successful connection.
-            await populateInitialData(); 
-            
+            await Admin.create({
+                fullName: 'Root System Admin',
+                email: ADMIN_EMAIL,
+                passwordHash: hashedPassword,
+                role: 'RootAdmin'
+            });
+            console.log('✅ Default Root Admin created successfully.');
         } catch (error) {
-            console.error('*** CRITICAL: MongoDB connection error. Cannot start server. ***', error);
-            throw error;
+            console.error('❌ Failed to create default Root Admin:', error);
         }
     } else {
-        console.log('MongoDB already connected.');
+        console.log('ℹ️ Root Admin account already exists. Skipping creation.');
     }
+
+    console.log('ℹ️ Initial data population function executed.'); 
+    return true;
 }
 
 
@@ -3487,15 +3481,10 @@ async function connectDB() {
 // Make the 'uploads' folder publicly accessible 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 👈 FIX: Route handler to serve the main index.html file at the root URL
+// Route handler to serve the main index.html file at the root URL
 app.get('/', (req, res) => {
     // Load the confirmed public file (index.html) at the root URL
     res.sendFile(path.join(__dirname, 'index.html')); 
-});
-
-// Route for the user dashboard
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'user-dashboard.html')); 
 });
 
 // Serve all other static files from the project root
@@ -3503,28 +3492,9 @@ app.get('/dashboard', (req, res) => {
 app.use(express.static(path.join(__dirname))); 
 
 // ----------------------------------------------------------------------------------
-// --- SERVER START LOGIC (LAST THING IN THE FILE) ---
+// --- EXPORTS FOR NETLIFY SERVERLESS FUNCTION HANDLER (CRITICAL) ---
 // ----------------------------------------------------------------------------------
-const PORT = process.env.PORT || 11144;
 
-connectDB().then(() => {
-    // This executes ONLY if the database connection was successful
-    
-    app.listen(PORT, '0.0.0.0', () => { 
-        // --- ALL Console Logs MUST be inside this app.listen callback ---
-        
-        console.log(`\n🚀 Node.js/Express Server listening on http://0.0.0.0:${PORT}`);
-        console.log(`✅ Frontend Available at: http://localhost:${PORT}/`);
-        
-        // ... (rest of your logs remain the same) ...
-        
-        // Final Status Checks
-        console.log(`🚨 JWT Secret Loaded: ${process.env.JWT_SECRET ? 'YES' : 'NO'}`);
-        console.log('------------------------------------------------------------');
-        
-    });
-}).catch(err => {
-    // This executes ONLY if the database connection failed
-    console.error('❌ Server startup failed due to database error. Exiting process.', err);
-    process.exit(1);   
-});
+// This exports the Express app instance and the database initialization function,
+// which are required by netlify/functions/api.js.
+module.exports = { app, mongoose, populateInitialData };
