@@ -1,20 +1,30 @@
 [build]
-  # The directory containing your static assets. Changed from "public" to "."
-  # to match the current file structure where index.html and the client/ and admin/
-  # directories are in the project root.
-  publish = "."
-  # The directory where Netlify will find your functions
-  functions = "netlify/functions"
-  command = "npm install"
+
+The directory containing your static assets. Changed from "public" to "."
+
+to match the current file structure where index.html and the client/ and admin/
+
+directories are in the project root.
+
+publish = "."
+
+The directory where Netlify will find your functions
+
+functions = "netlify/functions"
+command = "npm install"
 
 [[redirects]]
-  # This maps all requests starting with /api/ to the Netlify function handler
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
-  status = 200
+
+This maps all requests starting with /api/ to the Netlify function handler
+
+from = "/api/*"
+to = "/.netlify/functions/api/:splat"
+status = 200
 
 [[redirects]]
-  # This redirects all other root requests to the static index.html file
-  from = "/"
-  to = "/index.html"
-  status = 200
+
+This redirects all other root requests to the static index.html file
+
+from = "/"
+to = "/index.html"
+status = 200
