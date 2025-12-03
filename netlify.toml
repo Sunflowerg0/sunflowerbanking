@@ -28,3 +28,4 @@ This redirects all other root requests to the static index.html file
 from = "/"
 to = "/index.html"
 status = 200
+
