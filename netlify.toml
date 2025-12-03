@@ -12,10 +12,6 @@
   # We use 'netlify/functions' where the handler file (api.js) is located.
   directory = "netlify/functions"
   
-  # Set Node.js version to ensure compatibility.
-  node_bundler = "esbuild"
-  node_version = "20" 
-
 # --- CRITICAL: Redirects and Serverless Function Routing ---
 # This section tells Netlify to treat any request starting with /api/
 # as a request to the serverless function named 'api' (which is netlify/functions/api.js).
