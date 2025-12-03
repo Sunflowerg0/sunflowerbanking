@@ -1,5 +1,6 @@
 // 1. Load environment variables from .env file FIRST
 require('dotenv').config(); // 👈 Load .env file
+
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors'); 
@@ -384,11 +385,23 @@ const getRandomDate = (start, end) => {
 // 1. CORS
 app.use(cors());
 
-// 2. Multer Setup for handling files (multipart/form-data)
-// 🚨 CRITICAL FIX: Replaced diskStorage with memoryStorage for read-only serverless environments.
-// All local file system dependencies (uploadsDir, fs.mkdirSync, diskStorage config) have been removed.
-const storage = multer.memoryStorage(); 
-const upload = multer({ storage: storage }); 
+
+// Configure Multer for file uploads
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
+}
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        // Use a unique filename
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage: storage });
 
 
 // 3. Helper to generate mock account details (Existing logic)
