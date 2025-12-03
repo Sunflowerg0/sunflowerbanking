@@ -4,8 +4,9 @@
   publish = "."
   
   # Specify the command to run before deployment (e.g., install dependencies for local builds)
-  # For simple Express apps, we often skip this or just ensure the dependencies are installed.
-  command = "echo 'No build command required for this setup'"
+  # 💡 FIX: The 'No build command...' caused dependency errors. 
+  # We MUST run 'npm install' so Netlify bundles the required node modules (like serverless-http).
+  command = "npm install"
 
 [functions]
   # Directory where your Netlify Function files live.
