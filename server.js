@@ -385,21 +385,11 @@ const getRandomDate = (start, end) => {
 app.use(cors());
 
 // 2. Multer Setup for handling files (multipart/form-data)
-const uploadsDir = path.join(__dirname, 'uploads/');
-// Ensure the uploads directory exists
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
-
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
+// 🚨 CRITICAL FIX: Replaced diskStorage with memoryStorage for read-only serverless environments.
+// All local file system dependencies (uploadsDir, fs.mkdirSync, diskStorage config) have been removed.
+const storage = multer.memoryStorage(); 
 const upload = multer({ storage: storage }); 
+
 
 // 3. Helper to generate mock account details (Existing logic)
 // 🚨 NOTE: This function is now used by generateUniqueAccountDetails to create a candidate object.
@@ -3474,6 +3464,45 @@ async function populateInitialData() {
 }
 
 
+// ------------------------------------------------------------
+// --- Database Initialization Function (MUST BE DEFINED HERE) ---
+// ------------------------------------------------------------
+// This function is called by netlify/functions/api.js to ensure the database
+// is seeded/checked immediately after a successful connection.
+async function populateInitialData() {
+    // Since the User and Admin models are defined earlier, we can use them here.
+    // 💡 UPDATED: Use the new constants defined at the top of the file
+    const rootAdminEmail = ADMIN_EMAIL; 
+    const rootAdminPassword = ADMIN_PASSWORD;
+    
+    // 1. Check if the root Admin account exists
+    const existingAdmin = await Admin.findOne({ email: rootAdminEmail });
+
+    if (!existingAdmin) {
+        console.log(`ℹ️ Root Admin account (${rootAdminEmail}) not found. Creating default admin...`);
+        
+        try {
+            // bcrypt is required here for hashing the default admin password
+            // Make sure bcrypt is imported at the top of server.js
+            const hashedPassword = await bcrypt.hash(rootAdminPassword, SALT_ROUNDS);
+            
+            await Admin.create({
+                fullName: 'Sunflower Bank',
+                email: rootAdminEmail,
+                passwordHash: hashedPassword,
+                role: 'BasicAdmin'
+            });
+            console.log('✅ Default Root Admin created successfully.');
+        } catch (error) {
+            console.error('❌ Failed to create default Root Admin:', error);
+        }
+    } else {
+        console.log('ℹ️ Root Admin account already exists. Skipping creation.');
+    }
+
+    console.log('ℹ️ Initial data population function executed.'); 
+    return true;
+}
 // ----------------------------------------------------------------------------------
 // 🚀 EXPRESS ROUTING AND MIDDLEWARE DEFINITIONS (MUST BE HERE)
 // ----------------------------------------------------------------------------------
