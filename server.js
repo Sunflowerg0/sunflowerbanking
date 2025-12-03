@@ -3510,7 +3510,6 @@ const PORT = process.env.PORT || 11144;
 connectDB().then(() => {
     // This executes ONLY if the database connection was successful
     
-    // 💡 CRITICAL FIX: Add '0.0.0.0' to ensure the server is accessible by PXXL's proxy/router.
     app.listen(PORT, '0.0.0.0', () => { 
         // --- ALL Console Logs MUST be inside this app.listen callback ---
         
