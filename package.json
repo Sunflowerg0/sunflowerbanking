@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node netlify/functions/api.js",
     "dev": "nodemon netlify/functions/api.js",
-    "build": "npm install"
+    "build": "npm install && cpr server.js netlify/functions/server.js"
   },
   "dependencies": {
     "@aws-sdk/s3-request-presigner": "^3.932.0",
@@ -21,6 +21,7 @@
     "serverless-http": "^3.2.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "cpr": "^3.0.1"
   }
 }

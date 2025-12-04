@@ -3,7 +3,7 @@
 const serverless = require('serverless-http');
 
 // This path MUST now resolve to the new server.js file created in the project root.
-const { app, populateInitialData, mongoose } = require('../../server'); 
+const { app, populateInitialData, mongoose } = require('./server'); 
 
 // Cache the database connection across warm invocations
 let cachedDb = null;
