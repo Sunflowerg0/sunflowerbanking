@@ -1,4 +1,3 @@
-// netlify/functions/api.js
 const serverless = require('serverless-http');
 // CHANGE 1: Import populateInitialData and mongoose from server.js
 const { app, populateInitialData, mongoose } = require('../../server'); // Path to your Express app (server.js)
@@ -7,6 +6,7 @@ const { app, populateInitialData, mongoose } = require('../../server'); // Path 
 let cachedDb = null;
 
 async function connectToDatabase() {
+    // Check if MongoDB is already connected (readyState 1)
     if (cachedDb && mongoose.connection.readyState === 1) {
         console.log('MongoDB already connected. Reusing connection.');
         return cachedDb;
@@ -14,11 +14,13 @@ async function connectToDatabase() {
 
     console.log('Connecting to MongoDB...');
     try {
-        cachedDb = await mongoose.connect(process.env.MONGODB_URI, { // Use MONGO_URI, not MONGODB_URI if that's your env var name
+        // Corrected syntax: all options are correctly inside the options object {}
+        cachedDb = await mongoose.connect(process.env.MONGODB_URI, {
             bufferCommands: false,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
         });
+        
         console.log('MongoDB connected successfully!');
 
         // CHANGE 2: Call populateInitialData after successful connection
