@@ -3472,18 +3472,23 @@ async function populateInitialData() {
 // 🚀 EXPRESS ROUTING AND MIDDLEWARE DEFINITIONS (STAYS THE SAME)
 // ----------------------------------------------------------------------------------
 
-// Make the 'uploads' folder publicly accessible 
-//app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Make the 'uploads' folder publicly accessible
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Route handler to serve the main index.html file at the root URL
-// app.get('/', (req, res) => {
+// Serve static files from specific, known client-side directories.
+// This prevents exposing sensitive files outside these folders.
+
+// 1. Serve 'client' assets (e.g., /client/styles.css)
+app.use('/client', express.static(path.join(__dirname, 'client')));
+
+// 2. Serve 'admin' assets (e.g., /admin/dashboard.js)
+app.use('/admin', express.static(path.join(__dirname, 'admin')));
+
+// 3. Handle the main index.html file at the root URL
+app.get('/', (req, res) => {
     // Load the confirmed public file (index.html) at the root URL
-   // res.sendFile(path.join(__dirname, 'index.html')); 
-//});
-
-// Serve all other static files from the project root (client/, admin/, etc.)
-// This MUST come AFTER all API routes and explicit routes like app.get('/')
-// app.use(express.static(path.join(__dirname))); 
+    res.sendFile(path.join(__dirname, 'index.html')); 
+});
 
 // ----------------------------------------------------------------------------------
 // --- VERCEL COMPATIBLE SERVER STARTUP LOGIC (CRITICAL CHANGE) ---
