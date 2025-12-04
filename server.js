@@ -1,4 +1,3 @@
-// 1. Load environment variables from .env file FIRST
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors'); 
@@ -10,8 +9,6 @@ const SALT_ROUNDS = 10;
 const jwt = require('jsonwebtoken'); 
 const crypto = require('crypto');   
 const nodemailer = require('nodemailer'); 
-const serverless = require('serverless-http'); // Added for the local setup consistency
-
 
 const app = express();
 // NEW: Use express.json() middleware for parsing JSON bodies in API requests

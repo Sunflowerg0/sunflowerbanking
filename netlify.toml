@@ -1,30 +1,18 @@
 [build]
-command = "npm run build"
-publish = "."
-
-[functions]
-directory = "netlify/functions"
-node_bundler = "esbuild"
-# 👇 ADD THIS LINE and the list below 👇
-external_node_modules = [
-  "express", 
-  "mongoose", 
-  "serverless-http", 
-  "bcryptjs", 
-  "jsonwebtoken",
-  "nodemailer"
-]
-
-[context.production.environment]
-NODE_VERSION = "20"
+  # The directory containing your static assets
+  publish = ""
+  # The directory where Netlify will find your functions
+  functions = "netlify/functions"
+  command = "npm install"
 
 [[redirects]]
-from = "/api/*"
-to = "/.netlify/functions/api/:splat"
-status = 200
-force = true
+  # This maps all requests starting with /api/ to the Netlify function handler
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
 
 [[redirects]]
-from = "/*"
-to = "/index.html"
-status = 200
+  # This redirects all other root requests to the static index.html file
+  from = "/"
+  to = "/index.html"
+  status = 200 
