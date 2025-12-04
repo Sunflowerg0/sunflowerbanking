@@ -1,34 +1,25 @@
 [build]
-
-The command to run before deployment. This runs the build script defined in package.json.
-
+# The command to run before deployment. This runs the build script defined in package.json.
 command = "npm run build"
 
-The directory containing static files (index.html, assets).
-
+# The directory containing static files (index.html, assets).
 publish = "."
 
 [functions]
-
-Directory where your Netlify Function files live.
-
+# Directory where your Netlify Function files live.
 directory = "netlify/functions"
 
-CRITICAL FIX: Explicitly use esbuild for better dependency resolution in serverless-http setups.
-
+# CRITICAL FIX: Explicitly use esbuild for better dependency resolution in serverless-http setups.
 node_bundler = "esbuild"
 
 [context.production.environment]
-
-Specify a stable Node.js version
-
+# Specify a stable Node.js version
 NODE_VERSION = "20"
 
---- CRITICAL: Redirects and Serverless Function Routing ---
+# --- CRITICAL: Redirects and Serverless Function Routing ---
 
-This section tells Netlify to treat any request starting with /api/
-
-as a request to the serverless function named 'api' (which is netlify/functions/api.js).
+# This section tells Netlify to treat any request starting with /api/
+# as a request to the serverless function named 'api' (which is netlify/functions/api.js).
 
 [[redirects]]
 from = "/api/*"
@@ -36,8 +27,7 @@ to = "/.netlify/functions/api/:splat"
 status = 200
 force = true
 
-Fallback for the client-side single-page application (SPA)
-
+# Fallback for the client-side single-page application (SPA)
 [[redirects]]
 from = "/*"
 to = "/index.html"
