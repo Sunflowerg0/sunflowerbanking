@@ -3473,17 +3473,17 @@ async function populateInitialData() {
 // ----------------------------------------------------------------------------------
 
 // Make the 'uploads' folder publicly accessible 
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+//app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Route handler to serve the main index.html file at the root URL
-app.get('/', (req, res) => {
+// app.get('/', (req, res) => {
     // Load the confirmed public file (index.html) at the root URL
-    res.sendFile(path.join(__dirname, 'index.html')); 
-});
+   // res.sendFile(path.join(__dirname, 'index.html')); 
+//});
 
 // Serve all other static files from the project root (client/, admin/, etc.)
 // This MUST come AFTER all API routes and explicit routes like app.get('/')
-app.use(express.static(path.join(__dirname))); 
+// app.use(express.static(path.join(__dirname))); 
 
 // ----------------------------------------------------------------------------------
 // --- VERCEL COMPATIBLE SERVER STARTUP LOGIC (CRITICAL CHANGE) ---

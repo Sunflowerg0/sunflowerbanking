@@ -10,7 +10,7 @@
     { "src": "/api/(.*)", "dest": "server.js" },
     { "src": "/(.*)", "dest": "/$1" }
   ],
- 
+  
   "buildCommand": "echo 'No static build needed'",
   "outputDirectory": "." 
 }
