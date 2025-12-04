@@ -3433,65 +3433,21 @@ app.post('/api/client/check-deposits', verifyClientToken, upload.fields([
 });
 
 // ------------------------------------------------------------
-// --- Database Initialization Function (MUST BE DEFINED HERE) ---
+// --- Database Initialization Function (STAYS THE SAME) ---
 // ------------------------------------------------------------
-// This function is called by netlify/functions/api.js to ensure the database
-// is seeded/checked immediately after a successful connection.
+// This function is called by the main server logic (below)
 async function populateInitialData() {
     // Since the User and Admin models are defined earlier, we can use them here.
-    const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
-    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-    
-    // 1. Check if the root Admin account exists
-    const existingAdmin = await Admin.findOne({ email: ADMIN_EMAIL });
-
-    if (!existingAdmin) {
-        console.log(`ℹ️ Root Admin account (${ADMIN_EMAIL}) not found. Creating default admin...`);
-        
-        try {
-            // bcrypt is required here for hashing the default admin password
-            // Make sure bcrypt is imported at the top of server.js
-            const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
-            
-            await Admin.create({
-                fullName: 'Root System Admin',
-                email: ADMIN_EMAIL,
-                passwordHash: hashedPassword,
-                role: 'RootAdmin'
-            });
-            console.log('✅ Default Root Admin created successfully.');
-        } catch (error) {
-            console.error('❌ Failed to create default Root Admin:', error);
-        }
-    } else {
-        console.log('ℹ️ Root Admin account already exists. Skipping creation.');
-    }
-
-    console.log('ℹ️ Initial data population function executed.'); 
-    return true;
-}
-
-
-// ------------------------------------------------------------
-// --- Database Initialization Function (MUST BE DEFINED HERE) ---
-// ------------------------------------------------------------
-// This function is called by netlify/functions/api.js to ensure the database
-// is seeded/checked immediately after a successful connection.
-async function populateInitialData() {
-    // Since the User and Admin models are defined earlier, we can use them here.
-    // 💡 UPDATED: Use the new constants defined at the top of the file
     const AdminEmail = ADMIN_EMAIL; 
     const AdminPassword = ADMIN_PASSWORD;
     
     // 1. Check if the root Admin account exists
-    const existingAdmin = await Admin.findOne({ email: AdminEmail });
+    const existingAdmin = await Admin.findOne({ email: AdminEmail }); // Assuming Admin model is defined/imported
 
     if (!existingAdmin) {
         console.log(`ℹ️ Root Admin account (${AdminEmail}) not found. Creating default admin...`);
         
         try {
-            // bcrypt is required here for hashing the default admin password
-            // Make sure bcrypt is imported at the top of server.js
             const hashedPassword = await bcrypt.hash(AdminPassword, SALT_ROUNDS);
             
             await Admin.create({
@@ -3511,8 +3467,9 @@ async function populateInitialData() {
     console.log('ℹ️ Initial data population function executed.'); 
     return true;
 }
+
 // ----------------------------------------------------------------------------------
-// 🚀 EXPRESS ROUTING AND MIDDLEWARE DEFINITIONS (MUST BE HERE)
+// 🚀 EXPRESS ROUTING AND MIDDLEWARE DEFINITIONS (STAYS THE SAME)
 // ----------------------------------------------------------------------------------
 
 // Make the 'uploads' folder publicly accessible 
@@ -3524,14 +3481,44 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html')); 
 });
 
-// Serve all other static files from the project root
+// Serve all other static files from the project root (client/, admin/, etc.)
 // This MUST come AFTER all API routes and explicit routes like app.get('/')
 app.use(express.static(path.join(__dirname))); 
 
 // ----------------------------------------------------------------------------------
-// --- EXPORTS FOR NETLIFY SERVERLESS FUNCTION HANDLER (CRITICAL) ---
+// --- VERCEL COMPATIBLE SERVER STARTUP LOGIC (CRITICAL CHANGE) ---
 // ----------------------------------------------------------------------------------
 
-// This exports the Express app instance and the database initialization function,
-// which are required by netlify/functions/api.js.
-module.exports = { app, mongoose, populateInitialData };
+// This block is what Vercel expects for a standard Node.js server entry file.
+// It initiates the database connection and starts the Express server.
+async function startServer() {
+    try {
+        await mongoose.connect(MONGODB_URI);
+        console.log('🔗 Database connection established successfully.');
+
+        // Run the data population function immediately after connection
+        await populateInitialData();
+
+        // Start listening only in a local environment, Vercel handles the listener
+        if (process.env.NODE_ENV !== 'production') {
+            app.listen(PORT, () => {
+                console.log(`🌐 Server running locally on http://localhost:${PORT}`);
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ FATAL ERROR: Failed to connect to database or start server:', error);
+        process.exit(1);
+    }
+}
+
+// Execute the server start function
+startServer();
+
+// ----------------------------------------------------------------------------------
+// --- VERCEL EXPORT (MINIMAL) ---
+// ----------------------------------------------------------------------------------
+
+// Only export the app itself for Vercel to correctly identify and wrap it 
+// as a Serverless Function. This is often optional but good practice.
+module.exports = app;
