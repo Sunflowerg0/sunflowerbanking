@@ -1,32 +1,43 @@
 [build]
-# Specify the directory where your build process outputs static files (if any).
-# Since this is a serverless app relying on Node, we'll use the root, assuming index.html is there.
+
+The command to run before deployment. This runs the build script defined in package.json.
+
+command = "npm run build"
+
+The directory containing static files (index.html, assets).
+
 publish = "."
- 
-# Specify the command to run before deployment (e.g., install dependencies for local builds)
-# This command ensures all required node modules (like dotenv) are bundled for the functions.
-command = "npm install"
 
 [functions]
-# Directory where your Netlify Function files live.
-directory = "netlify/functions"
- 
-[context.production.environment]
-    # Specify a stable Node.js version
-    NODE_VERSION = "20" 
 
-# --- CRITICAL: Redirects and Serverless Function Routing ---
-# This section tells Netlify to treat any request starting with /api/
-# as a request to the serverless function named 'api' (which is netlify/functions/api.js).
+Directory where your Netlify Function files live.
+
+directory = "netlify/functions"
+
+CRITICAL FIX: Explicitly use esbuild for better dependency resolution in serverless-http setups.
+
+node_bundler = "esbuild"
+
+[context.production.environment]
+
+Specify a stable Node.js version
+
+NODE_VERSION = "20"
+
+--- CRITICAL: Redirects and Serverless Function Routing ---
+
+This section tells Netlify to treat any request starting with /api/
+
+as a request to the serverless function named 'api' (which is netlify/functions/api.js).
+
 [[redirects]]
 from = "/api/*"
 to = "/.netlify/functions/api/:splat"
 status = 200
 force = true
 
-# Fallback for the client-side single-page application (SPA)
-# If a request doesn't match an explicit file or API route, send it to index.html
-# This ensures client-side routing works when the user navigates directly to /dashboard or /login.
+Fallback for the client-side single-page application (SPA)
+
 [[redirects]]
 from = "/*"
 to = "/index.html"
