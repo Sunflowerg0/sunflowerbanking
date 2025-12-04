@@ -1,21 +1,28 @@
+// Netlify function handler: netlify/functions/api.js
+
 const serverless = require('serverless-http');
-// CHANGE 1: Import populateInitialData and mongoose from server.js
-const { app, populateInitialData, mongoose } = require('../../server'); // Path to your Express app (server.js)
+
+// CHANGE 1: Import populateInitialData, mongoose, and the Express app instance.
+// NOTE: I am using '../server' which assumes server.js is one directory up (in the project root).
+// If your server.js is two directories up, change this to '../../server'.
+const { app, populateInitialData, mongoose } = require('../server'); 
 
 // Cache the database connection across warm invocations
 let cachedDb = null;
 
 async function connectToDatabase() {
     // Check if MongoDB is already connected (readyState 1)
-    if (cachedDb && mongoose.connection.readyState === 1) {
+    // We use mongoose.connection.readyState check instead of cachedDb for reliability.
+    if (mongoose.connection.readyState === 1) {
         console.log('MongoDB already connected. Reusing connection.');
-        return cachedDb;
+        return mongoose.connection;
     }
 
     console.log('Connecting to MongoDB...');
     try {
         // Corrected syntax: all options are correctly inside the options object {}
-        cachedDb = await mongoose.connect(process.env.MONGODB_URI, {
+        // The result of connect is the Mongoose instance itself, not the connection object.
+        await mongoose.connect(process.env.MONGODB_URI, {
             bufferCommands: false,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
@@ -28,6 +35,7 @@ async function connectToDatabase() {
         await populateInitialData(); // This will create the admin user if not present
         console.log('Initial data population attempt complete.');
 
+        cachedDb = mongoose.connection;
         return cachedDb;
     } catch (error) {
         console.error('MongoDB connection error:', error);
@@ -41,14 +49,22 @@ const handler = serverless(app);
 
 // Netlify Function handler
 exports.handler = async (event, context) => {
+    // IMPORTANT: Set context.callbackWaitsForEmptyEventLoop = false 
+    // to allow Lambda to return the response immediately without waiting for 
+    // the MongoDB connection (or other background tasks) to fully close.
+    // This is crucial for performance and connection pooling.
+    context.callbackWaitsForEmptyEventLoop = false;
+
     // Ensure the database connection is established BEFORE processing the request
     try {
         await connectToDatabase();
     } catch (dbError) {
         console.error('Handler caught DB connection error:', dbError);
+        // Log the error detail without exposing sensitive info if possible
+        const errorMessage = (dbError && dbError.message) || 'Unknown database error.';
         return {
             statusCode: 500,
-            body: JSON.stringify({ message: 'Database connection failed.', error: dbError.message }),
+            body: JSON.stringify({ message: 'Database connection failed.', error: errorMessage }),
         };
     }
 
