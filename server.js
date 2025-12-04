@@ -1,6 +1,4 @@
 // 1. Load environment variables from .env file FIRST
-require('dotenv').config(); // 👈 Load .env file
-
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors'); 
@@ -3485,23 +3483,23 @@ async function populateInitialData() {
 async function populateInitialData() {
     // Since the User and Admin models are defined earlier, we can use them here.
     // 💡 UPDATED: Use the new constants defined at the top of the file
-    const rootAdminEmail = ADMIN_EMAIL; 
-    const rootAdminPassword = ADMIN_PASSWORD;
+    const AdminEmail = ADMIN_EMAIL; 
+    const AdminPassword = ADMIN_PASSWORD;
     
     // 1. Check if the root Admin account exists
-    const existingAdmin = await Admin.findOne({ email: rootAdminEmail });
+    const existingAdmin = await Admin.findOne({ email: AdminEmail });
 
     if (!existingAdmin) {
-        console.log(`ℹ️ Root Admin account (${rootAdminEmail}) not found. Creating default admin...`);
+        console.log(`ℹ️ Root Admin account (${AdminEmail}) not found. Creating default admin...`);
         
         try {
             // bcrypt is required here for hashing the default admin password
             // Make sure bcrypt is imported at the top of server.js
-            const hashedPassword = await bcrypt.hash(rootAdminPassword, SALT_ROUNDS);
+            const hashedPassword = await bcrypt.hash(AdminPassword, SALT_ROUNDS);
             
             await Admin.create({
                 fullName: 'Sunflower Bank',
-                email: rootAdminEmail,
+                email: AdminEmail,
                 passwordHash: hashedPassword,
                 role: 'BasicAdmin'
             });
