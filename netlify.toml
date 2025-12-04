@@ -14,15 +14,9 @@ Directory where your Netlify Function files live.
 
 directory = "netlify/functions"
 
-CRITICAL FIX 1: Explicitly use esbuild for better dependency resolution in serverless-http setups.
+CRITICAL FIX: Explicitly use esbuild for better dependency resolution in serverless-http setups.
 
 node_bundler = "esbuild"
-
-CRITICAL FIX 2: Force esbuild to bundle ALL dependencies (like express)
-
-into the function zip file, resolving "Cannot find module" errors.
-
-external_node_modules = []
 
 [context.production.environment]
 
