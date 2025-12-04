@@ -6,8 +6,7 @@
   "scripts": {
     "start": "node netlify/functions/api.js",
     "dev": "nodemon netlify/functions/api.js",
-    "build": "npm install && cpr server.js netlify/functions/server.js"
-  },
+  "build": "npm install && cpr node_modules netlify/functions/node_modules && cpr server.js netlify/functions/server.js"  },
   "dependencies": {
     "@aws-sdk/s3-request-presigner": "^3.932.0",
     "bcryptjs": "^2.4.3",
