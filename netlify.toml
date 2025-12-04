@@ -3,13 +3,9 @@ command = "npm run build"
 publish = "."
 
 [functions]
-# Directory where your Netlify Function files live.
 directory = "netlify/functions"
-
-# CRITICAL FIX: Explicitly use esbuild for better dependency resolution in serverless-http setups.
 node_bundler = "esbuild"
-# ADDED: Explicitly tell esbuild not to bundle these large modules.
-# Your 'npm run build' command will ensure they are copied to netlify/functions/node_modules.
+# 👇 ADD THIS LINE and the list below 👇
 external_node_modules = [
   "express", 
   "mongoose", 
@@ -20,10 +16,7 @@ external_node_modules = [
 ]
 
 [context.production.environment]
-# Specify a stable Node.js version
 NODE_VERSION = "20"
-
-# --- CRITICAL: Redirects and Serverless Function Routing ---
 
 [[redirects]]
 from = "/api/*"
