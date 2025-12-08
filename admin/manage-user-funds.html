@@ -167,7 +167,7 @@
     // ----------------------------------------------------------------------
     // --- CONFIGURATION & GLOBALS ---
     // ----------------------------------------------------------------------
-   // --- Configuration (Real Endpoints) ---
+    // --- Configuration (Real Endpoints) ---
     // NOTE: These are the assumed REST API endpoints for a Node.js/Express backend.
     const API_USER_DETAIL_URL = '/api/users/'; // Will be appended with userId, e.g., /api/users/user-1001
     const API_FUNDS_TRANSFER_URL = '/api/funds/transfer'; // POST request
@@ -381,7 +381,8 @@
             }
 
             if (!response.ok) {
-                const errorBody = await response.json().catch(() => ({ message: `HTTP error! Status: ${response.status}` }));
+                // Try to parse error body as JSON, falling back to a generic message
+                const errorBody = await response.json().catch(() => ({ message: `HTTP error! Status: ${response.status} (Non-JSON response)` }));
                 throw new Error(errorBody.message || `Failed to fetch user data: Status ${response.status}`);
             }
 
@@ -399,6 +400,7 @@
 
     /**
      * Handles the Credit/Debit transaction form submission by calling the real API.
+     * FIX: Added defensive check for response.json() to prevent SyntaxError on 500 status.
      */
     const handleTransaction = async (event) => {
         event.preventDefault();
@@ -459,8 +461,22 @@
                 logoutAndRedirect();
                 return;
             }
-
-            const result = await response.json();
+            
+            // --- MODIFIED SECTION: Defensive JSON Parsing ---
+            let result;
+            try {
+                // Attempt to parse response body. This is where the original SyntaxError occurred.
+                result = await response.json();
+            } catch (e) {
+                if (!response.ok) {
+                    // This handles the 500 error returning HTML/Text instead of JSON
+                    throw new Error(`Server error (${response.status}). The server returned a non-JSON error response.`);
+                }
+                // If response.ok is true but parsing still failed (e.g., empty body), treat as an unexpected success format error.
+                result = {}; // Default empty object
+                console.warn("Received non-JSON response body despite successful HTTP status (response.ok).", e);
+            }
+            // --- END MODIFIED SECTION ---
 
             if (!response.ok) {
                 // Handle server-side validation or business logic errors (e.g., insufficient funds)
@@ -523,6 +539,6 @@
         // 4. Fetch user data (Real API Call)
         fetchUserDetails();
     });
-    </script>
+</script>
 </body>
 </html>
