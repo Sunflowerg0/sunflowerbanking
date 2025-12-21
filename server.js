@@ -491,9 +491,9 @@ const deleteProfilePicture = (filePath) => {
  */
 async function sendOtpEmail(recipientEmail, otp) {
     const mailOptions = {
-        from: `Sunflower Bank Security <${process.env.EMAIL_USER}>`,
+        from: `Sunflower Union Security <${process.env.EMAIL_USER}>`,
         to: recipientEmail,
-        subject: 'Sunflower Bank: Your Secure Login Code',
+        subject: 'Sunflower Union: Your Secure Login Code',
         html: `
             <!-- Main Responsive Container -->
             <div style="
@@ -509,7 +509,7 @@ async function sendOtpEmail(recipientEmail, otp) {
             ">
                 <div style="text-align: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
                     <!-- Sunflower Bank Logo -->
-                    <img src="https://i.imgur.com/Q6dsATF.png" alt="Sunflower Bank Logo" style="width: 150px; height: auto;">
+                    <img src="https://i.imgur.com/NQxhjxt.png" alt="Sunflower Bank Logo" style="width: 150px; height: auto;">
                 </div>
                 
                 <h1 style="color: #0076a3; font-size: 22px; text-align: center; margin-top: 0; margin-bottom: 15px;">

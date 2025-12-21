@@ -61,7 +61,7 @@
                 <!-- Using a standard bank logo placeholder -->
                 <img src="https://i.imgur.com/NQxhjxt.png" alt="Admin Bank Logo" class="mx-auto mb-2">
                 <p class="text-xs text-gray-500 mt-4">
-                    <span class="font-bold text-xs text-blue-800">FDIC</span> Insured. Secured by the full faith and credit of the U.S. Government.
+                    <span class="font-bold text-xs text-blue-800">FDIC</span> Insured. Secured by the full faith and credit.
                 </p>
             </div>
 
@@ -207,165 +207,119 @@
             </div>
         </div>
     </footer>
+    
+<script>
+    // Keeping this as an empty string since your frontend/backend are on the same domain
+    const API_BASE_URL = '';
 
-   <script>
-        // Set the base URL for API requests
-const API_BASE_URL = 'https://sunflowerunions.vercel.app';
+    const loginCard = document.getElementById('login-card');
+    const registerCard = document.getElementById('register-card');
+    const messageBox = document.getElementById('message-box');
+    
+    function showLoginCard() {
+        loginCard.classList.remove('hidden');
+        registerCard.classList.add('hidden');
+    }
 
-        const loginCard = document.getElementById('login-card');
-        const registerCard = document.getElementById('register-card');
-        const messageBox = document.getElementById('message-box');
-        
-        // --- View Toggling Functions (No Change) ---
-        
-        function showLoginCard() {
-            loginCard.classList.remove('hidden');
-            registerCard.classList.add('hidden');
-        }
+    function showRegisterCard() {
+        loginCard.classList.add('hidden');
+        registerCard.classList.remove('hidden');
+    }
 
-        function showRegisterCard() {
-            loginCard.classList.add('hidden');
-            registerCard.classList.remove('hidden');
-        }
+    function showMessage(message, bgColorClass) {
+        messageBox.className = 'fixed top-0 left-0 w-full p-4 text-white text-center shadow-lg transition-all duration-300 z-50';
+        messageBox.classList.remove('hidden');
+        messageBox.classList.add(bgColorClass);
+        messageBox.innerHTML = `<p>${message}</p>`;
 
-        function showMessage(message, bgColorClass) {
-            
-            messageBox.className = 'fixed top-0 left-0 w-full p-4 text-white text-center shadow-lg transition-all duration-300 z-50';
-            messageBox.classList.remove('hidden');
-            messageBox.classList.add(bgColorClass);
-            messageBox.innerHTML = `<p>${message}</p>`;
+        setTimeout(() => {
+            messageBox.classList.add('hidden');
+        }, 4000);
+    }
 
-            setTimeout(() => {
-                messageBox.classList.add('hidden');
-            }, 4000);
-        }
+    // --- ADMIN LOGIN HANDLER ---
+    document.getElementById('admin-login-form').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        
+        const adminId = document.getElementById('adminId').value;
+        const password = document.getElementById('password').value;
+        const loginButton = document.getElementById('login-button');
 
-        // ----------------------------------------------------
-        // --- UPDATED: ADMIN LOGIN HANDLER (Using API) ---
-        // ----------------------------------------------------
+        loginButton.disabled = true;
+        loginButton.innerHTML = "Logging In...";
 
-        document.getElementById('admin-login-form').addEventListener('submit', async function(event) {
-            event.preventDefault();
-            
-            const adminId = document.getElementById('adminId').value;
-            const password = document.getElementById('password').value;
-            const loginButton = document.getElementById('login-button');
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/admins/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId, password })
+            });
 
-            // 1. Show Loading State and Disable Button
-            loginButton.innerHTML = `
-                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Logging In...
-            `;
-            loginButton.disabled = true;
+            // --- SAFETY CHECK START ---
+            // This prevents the "Unexpected token A" error when the server crashes
+            const contentType = response.headers.get("content-type");
+            if (!contentType || !contentType.includes("application/json")) {
+                const errorText = await response.text();
+                console.error("Critical Server Error:", errorText);
+                throw new Error("Server Error: Database connection failed or Secret Key missing.");
+            }
+            // --- SAFETY CHECK END ---
 
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/admins/login`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ adminId, password })
-                });
+            const data = await response.json();
 
-                const data = await response.json();
+            if (response.ok && data.success) {
+                if (data.token) localStorage.setItem('adminToken', data.token);
+                if (data.adminName) localStorage.setItem('adminName', data.adminName);
+                
+                showMessage('Login Successful!', 'bg-green-500');
+                setTimeout(() => { window.location.href = 'admin-dashboard.html'; }, 1000); 
+            } else {
+                showMessage(data.message || 'Invalid Credentials', 'bg-red-500');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            // This will now show a readable error instead of a SyntaxError
+            showMessage(error.message, 'bg-red-700');
+        } finally {
+            loginButton.innerHTML = 'Log In';
+            loginButton.disabled = false;
+        }
+    });
 
-                if (response.ok && data.success) {
-                    
-                    // 💡 JWT UPDATE START: Store the token and admin name
-                    if (data.token) {
-                        // Store the token for use in subsequent authenticated requests
-                        localStorage.setItem('adminToken', data.token);
-                    }
-                    if (data.adminName) {
-                        // Store the name to personalize the dashboard
-                        localStorage.setItem('adminName', data.adminName);
-                    }
-                    // 💡 JWT UPDATE END
-                    
-                    showMessage('Login Successful! Redirecting to dashboard...', 'bg-green-500');
-                    
-                    // Redirect to the admin dashboard
-                    setTimeout(() => {
-                        window.location.href = 'admin-dashboard.html'; 
-                    }, 1000); 
-                } else {
-                    // Server returned an error (400 or 401)
-                    showMessage(data.message || 'Login failed. Check server console.', 'bg-red-500');
-                }
-            } catch (error) {
-                console.error('Network Error:', error);
-                showMessage('Could not connect to the server. Is the backend running?', 'bg-red-700');
-            }
+    // --- ADMIN REGISTRATION HANDLER ---
+    document.getElementById('admin-register-form').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        
+        const fullName = document.getElementById('registerName').value;
+        const email = document.getElementById('registerEmail').value;
+        const password = document.getElementById('registerPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        const registerButton = document.getElementById('register-button');
 
-            // 2. Hide Loading State and Re-enable Button (Always run, even on error)
-            loginButton.innerHTML = 'Log In';
-            loginButton.disabled = false;
-        });
-        
-        // ----------------------------------------------------
-        // --- UPDATED: ADMIN REGISTRATION HANDLER (Using API) ---
-        // ----------------------------------------------------
+        if (password !== confirmPassword) return showMessage('Passwords do not match.', 'bg-yellow-500');
 
-        document.getElementById('admin-register-form').addEventListener('submit', async function(event) {
-            event.preventDefault();
-            
-            const fullName = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            const registerButton = document.getElementById('register-button');
+        registerButton.disabled = true;
 
-            if (password !== confirmPassword) {
-                // We don't need a loading state reset if validation fails instantly
-                return showMessage('Passwords do not match.', 'bg-yellow-500');
-            }
-            if (password.length < 6) {
-                return showMessage('Password must be at least 6 characters.', 'bg-yellow-500');
-            }
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/admins/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fullName, email, password })
+            });
 
-            // 1. Show Loading State and Disable Button
-            registerButton.innerHTML = `
-                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Registering...
-            `;
-            registerButton.disabled = true;
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/admins/register`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ fullName, email, password })
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.success) {
-                    showMessage('Registration Successful! Please log in.', 'bg-green-600');
-                    // Redirect back to login page on success
-                    setTimeout(showLoginCard, 2000);
-                } else {
-                    // Server returned an error (e.g., email already registered)
-                    showMessage(data.message || 'Registration failed. Check server console.', 'bg-red-500');
-                }
-
-            } catch (error) {
-                console.error('Network Error:', error);
-                showMessage('Could not connect to the server. Is the backend running?', 'bg-red-700');
-            }
-
-            // 2. Hide Loading State and Re-enable Button (Always run, even on error)
-            registerButton.innerHTML = 'Register Admin';
-            registerButton.disabled = false;
-        });
-
-    </script>
+            const data = await response.json();
+            if (response.ok && data.success) {
+                showMessage('Admin Registered!', 'bg-green-600');
+                setTimeout(showLoginCard, 2000);
+            } else {
+                showMessage(data.message || 'Registration failed.', 'bg-red-500');
+            }
+        } catch (error) {
+            showMessage("Registration Error: Check database connection.", 'bg-red-700');
+        } finally {
+            registerButton.disabled = false;
+        }
+    });
+</script>
 </body>
 </html>
