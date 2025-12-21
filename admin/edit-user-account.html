@@ -367,103 +367,78 @@
         }
     };
 
-   /**
- * Submits the form data to update the user using PUT /api/users/:id
- */
-window.submitUserUpdate = async () => {
-    const token = localStorage.getItem('adminToken');
-    if (!token) { logoutAndRedirect(); return; }
+    /**
+     * Submits the form data to update the user using PUT /api/users/:id
+     */
+    window.submitUserUpdate = async () => {
+        const token = localStorage.getItem('adminToken');
+        if (!token) { logoutAndRedirect(); return; }
 
-    const form = document.getElementById('edit-user-form');
-    // Initialize FormData from the form
-    const formData = new FormData(form);
-    const saveBtn = document.getElementById('save-user-btn');
+        const form = document.getElementById('edit-user-form');
+        const formData = new FormData(form);
+        const saveBtn = document.getElementById('save-user-btn');
 
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-    showToast(`Attempting to update ${originalUser.fullName || 'user'}...`, 'info');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        showToast(`Attempting to update ${originalUser.fullName || 'user'}...`, 'info');
 
-    try {
-        // 1. Client-side Validation
-        if (!formData.get('userIdName') || !formData.get('fullName') || !formData.get('email') || !formData.get('currency')) {
-            throw new Error("Username, Full Name, Email, and Currency are required fields.");
-        }
+        try {
+            // Check for required fields before sending
+            if (!formData.get('userIdName') || !formData.get('fullName') || !formData.get('email') || !formData.get('currency')) {
+                throw new Error("Username, Full Name, Email, and Currency are required fields.");
+            }
 
-        const pin = formData.get('transferPin');
-        if (pin && !/^\d{4}$/.test(pin)) {
-            throw new Error("Transfer PIN must be exactly 4 numeric digits.");
-        }
-        
-        const password = formData.get('userPassword');
-        if (password && password.length < 8) {
-            throw new Error("New password must be at least 8 characters long.");
-        }
+            // Client-side validation for PIN
+            const pin = formData.get('transferPin');
+            if (pin && !/^\d{4}$/.test(pin)) {
+                throw new Error("Transfer PIN must be exactly 4 numeric digits.");
+            }
+            
+            // Client-side validation for Password
+            const password = formData.get('userPassword');
+            if (password && password.length < 8) {
+                throw new Error("New password must be at least 8 characters long.");
+            }
+            
+            // Note: The form data is sent as 'multipart/form-data' because of the profilePicture file input.
+            const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}` 
+                },
+                body: formData,
+            });
 
-        // 2. FIX: Manually handle Nested Objects for Messages
-        // We look for the status (checkbox) and the content (textarea) for each message type
-        const messageTypes = ['announcementMessage', 'issueMessage', 'transferMessage'];
-        
-        messageTypes.forEach(type => {
-            // Mapping UI IDs to the object (Update these IDs if your HTML uses different ones)
-            const prefix = type.replace('Message', ''); // e.g., "announcement"
-            
-            const messageObj = {
-                isActive: document.getElementById(`${prefix}Active`)?.checked || false,
-                messageContent: document.getElementById(`${prefix}Content`)?.value || ""
-            };
-            
-            // Overwrite/Append the stringified version so the server can JSON.parse it
-            formData.set(type, JSON.stringify(messageObj));
-        });
+            if (response.status === 401 || response.status === 403) {
+                logoutAndRedirect();
+                return;
+            }
 
-        // 3. The API Request
-        const response = await fetch(`${USERS_API_BASE_URL}/${currentUserId}`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}` 
-                // Note: 'Content-Type' is NOT set here; fetch does it automatically for FormData
-            },
-            body: formData,
-        });
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.message || `API failed with status ${response.status}.`);
+            }
+            
+            // Success: Re-fetch the new data to update the form fields/preview
+            // This is crucial to show the newly generated account numbers if the currency was changed.
+            await fetchUserData();
+            
+            showToast(data.message || `Account updated successfully!`, 'success');
 
-        // 4. Handle Redirection if Auth Fails
-        if (response.status === 401 || response.status === 403) {
-            logoutAndRedirect();
-            return;
-        }
-
-        // 5. Check if the server sent an HTML error (crash) or valid JSON
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-            const errorText = await response.text();
-            console.error("Server crashed and returned HTML:", errorText);
-            throw new Error("Server error: The backend crashed while processing the data.");
-        }
-
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.message || `API failed with status ${response.status}.`);
-        }
-        
-        // 6. Success: Refresh the UI with the new data from server
-        await fetchUserData();
-        showToast(data.message || `Account updated successfully!`, 'success');
-
-    } catch (error) {
-        console.error("Error updating user:", error);
-        showToast(`Update Failed. ${error.message}`, 'error');
-        
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Changes';
-        
-        // Clear sensitive fields and file inputs
-        if (document.getElementById('userPassword')) document.getElementById('userPassword').value = '';
-        if (document.getElementById('transferPin')) document.getElementById('transferPin').value = '';
-        if (document.getElementById('profilePicture')) document.getElementById('profilePicture').value = '';
-    }
-};
+        } catch (error) {
+            console.error("Error updating user:", error);
+            showToast(`Update Failed. Reason: ${error.message || 'An unknown error occurred.'}`, 'error');
+            
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Changes';
+            // Clear password/pin fields after attempt to ensure they aren't accidentally re-submitted
+            document.getElementById('userPassword').value = '';
+            document.getElementById('transferPin').value = '';
+            document.getElementById('profilePicture').value = ''; // Clear file input
+        }
+    };
 
 
     // ----------------------------------------------------------------------
