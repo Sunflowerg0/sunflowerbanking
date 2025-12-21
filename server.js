@@ -770,7 +770,7 @@ async function sendTransferNotification(userEmail, transactionDetails) {
     }
     
     // Define the logo URL
-    const LOGO_URL = "https://i.imgur.com/Q6dsATF.png";
+    const LOGO_URL = "https://i.imgur.com/NQxhjxt.png";
 
     const mailOptions = {
         from: '"Sunflower Bank" <no-reply@sunflowerbank.com>',
@@ -1248,7 +1248,7 @@ app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), asy
 async function sendStatusUpdateEmail(userEmail, userName, transactionId, newStatus, notificationContext) {
     // NOTE: This assumes 'transporter' (defined with process.env variables) is accessible in this scope.
     // If this file is imported, 'transporter' must be imported or passed in. Assuming it's a global/accessible dependency here.
-    const LOGO_URL = 'https://i.imgur.com/Q6dsATF.png';
+    const LOGO_URL = 'https://i.imgur.com/NQxhjxt.png';
     const BANK_COLOR = '#0076a3'; // Primary bank color
     
     // --- 1. Dynamic Content Mapping based on newStatus ---
@@ -1380,7 +1380,7 @@ async function sendStatusUpdateEmail(userEmail, userName, transactionId, newStat
     // -----------------------------------------------------
     try {
         const info = await transporter.sendMail({
-            from: `"Sunflower Bank Security" <${process.env.EMAIL_USER}>`, // Sender email from env
+            from: `"Sunflower Union Security" <${process.env.EMAIL_USER}>`, // Sender email from env
             to: userEmail,
             subject: subject,
             html: htmlBody,
@@ -3451,7 +3451,7 @@ async function populateInitialData() {
             const hashedPassword = await bcrypt.hash(AdminPassword, SALT_ROUNDS);
             
             await Admin.create({
-                fullName: 'Sunflower Bank',
+                fullName: 'Sunflower Union',
                 email: AdminEmail,
                 passwordHash: hashedPassword,
                 role: 'BasicAdmin'
