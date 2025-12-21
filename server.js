@@ -1063,16 +1063,26 @@ app.get('/api/users/:id', verifyAdminToken, async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error while retrieving user data.' });
     }
 });
-// --- API for EDIT USER (edit-user-account & admin-message submission) ---
-// 🚨 PROTECTED ROUTE - CORRECTED LOGIC FOR ANNOUNCEMENT AND ISSUE MESSAGES
+
 app.put('/api/users/:id', verifyAdminToken, upload.single('profilePicture'), async (req, res) => {
     const { id } = req.params;
-    const updateData = req.body;
+    let updateData = { ...req.body }; 
     const profileFile = req.file;
 
     console.log(`\n--- Received PUT Request for User ID: ${id} ---`);
-    console.log('Update Data Keys:', Object.keys(updateData));
 
+    // 1. DATA PARSING: Handle stringified JSON from FormData
+    ['announcementMessage', 'issueMessage', 'transferMessage'].forEach(key => {
+        if (typeof updateData[key] === 'string') {
+            try {
+                updateData[key] = JSON.parse(updateData[key]);
+            } catch (e) {
+                console.warn(`⚠️ Could not parse ${key}, using original value or empty object.`);
+                updateData[key] = null; // Prevent crashes if data is malformed
+            }
+        }
+    });
+    
     if (!mongoose.Types.ObjectId.isValid(id)) {
         if (profileFile) fs.unlinkSync(profileFile.path);
         return res.status(400).json({ success: false, message: 'Invalid user ID format.' });
