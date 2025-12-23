@@ -886,10 +886,10 @@ app.post('/api/users', upload.single('profilePicture'), async (req, res) => {
         
         // 2. Generate two unique accounts (Checking and Savings)
         console.log('Generating unique Checking Account...');
-        const checkingAccount = await generateUniqueAccountDetails(User, currency, 'Checking', 100.00); 
+        const checkingAccount = await generateUniqueAccountDetails(User, currency, 'Checking', 0.00); 
         
         console.log('Generating unique Savings Account...');
-        const savingsAccount = await generateUniqueAccountDetails(User, currency, 'Savings', 500.00); 
+        const savingsAccount = await generateUniqueAccountDetails(User, currency, 'Savings', 0.00); 
 
         // 3. Create the new User document object
         const newUser = new User({
